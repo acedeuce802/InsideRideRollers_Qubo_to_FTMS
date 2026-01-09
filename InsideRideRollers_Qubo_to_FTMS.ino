@@ -112,8 +112,13 @@ static uint32_t lastStepUs     = 0;
 static float jogSpeedSps = 800.0f;   // manual moves (home/jog/goto)
 static float runSpeedSps = 1600.0f;  // normal tracking moves (if you use it later)
 
+// -------- Stepper disable below speed --------
+static constexpr float SPEED_DISABLE_MPH = 2.0f;   // disable if below this
+static constexpr float SPEED_ENABLE_MPH  = 2.3f;   // re-enable above this (hysteresis)
+static constexpr uint32_t SPEED_HOLDOFF_MS = 800;  // must stay below threshold this long
 
-
+static uint32_t gBelowSpeedSinceMs = 0;
+static bool gStepperAutoDisabled = false;
 
 static void stepperSetJogSpeed() {
   stepperSetSpeed(jogSpeedSps);
@@ -152,6 +157,30 @@ static inline void stepperSetDir(bool forward) {
   }
 }
 
+static void updateStepperEnableFromSpeed(float mph) {
+  const uint32_t now = millis();
+
+  // If currently enabled, start a timer when we go below threshold
+  if (!gStepperAutoDisabled) {
+    if (mph < SPEED_DISABLE_MPH) {
+      if (gBelowSpeedSinceMs == 0) gBelowSpeedSinceMs = now;
+      if (now - gBelowSpeedSinceMs >= SPEED_HOLDOFF_MS) {
+        stepperEnable(false);
+        gStepperAutoDisabled = true;
+      }
+    } else {
+      gBelowSpeedSinceMs = 0; // reset timer if speed comes back up
+    }
+  }
+  // If currently disabled, re-enable only when above a higher threshold
+  else {
+    if (mph > SPEED_ENABLE_MPH) {
+      stepperEnable(true);
+      gStepperAutoDisabled = false;
+      gBelowSpeedSinceMs = 0;
+    }
+  }
+}
 
 //Guarded SpeedFromPos stuff
 static constexpr float MAX_POWER_W = 2000.0f;
@@ -519,6 +548,12 @@ static void stepperSetSpeed(float sps) {
 
 
 // ===================== Homing =====================
+static volatile bool gIsHoming = false;
+static volatile bool gRehomeRequested = false;
+
+static uint32_t gLastLimitTripMs = 0;
+static const uint32_t REHOME_COOLDOWN_MS = 2000;   // don't rehome repeatedly if switch chatters
+
 static bool homeStepper() {
   Serial.println("[HOME] Starting homing...");
   stepperEnable(true);
@@ -579,6 +614,20 @@ static bool homeStepper() {
   return true;
 }
 
+static void requestRehome(const char* why) {
+  uint32_t now = millis();
+  if (gIsHoming) return;
+  if (now - gLastLimitTripMs < REHOME_COOLDOWN_MS) return;
+
+  gLastLimitTripMs = now;
+  gRehomeRequested = true;
+
+  // Freeze motion immediately (prevents driving into the switch)
+  logStepTarget = logStepPos;
+
+  Serial.printf("[SAFETY] Limit hit -> rehome requested (%s)\n", why);
+}
+
 
 // ===================== Grade -> target steps (simple linear mapping) =====================
 static int32_t gradeToSteps(float gradePercent) {
@@ -614,36 +663,36 @@ static void stepperGoto(int32_t pos) {
 static void stepperUpdate() {
   if (!gStepEn) return;
 
-
   physStepTarget = logicalToSteps(logStepTarget);
-
-
   if (physStepPos == physStepTarget) return;
-
 
   // Safety clamp (should never trigger in normal operation)
   if (physStepPos < PHYS_MIN_STEPS) physStepPos = PHYS_MIN_STEPS;
   if (physStepPos > PHYS_MAX_STEPS) physStepPos = PHYS_MAX_STEPS;
 
-
   uint32_t now = micros();
   if ((now - lastStepUs) < stepIntervalUs) return;
   lastStepUs = now;
 
+  bool forward = (physStepTarget > physStepPos);  // forward=true => away from switch
 
-  bool forward = (physStepTarget > physStepPos);
+  // --- HARD STOP: if limit is pressed, never step toward the switch ---
+  if (limitPressed() && !forward) {
+    // Freeze target and schedule rehome
+    logStepTarget = logStepPos;
+    requestRehome("stepperUpdate blocked negative step");
+    return;
+  }
+
   stepperSetDir(forward);
-
 
   digitalWrite(STEP_PIN, HIGH);
   delayMicroseconds(2);
   digitalWrite(STEP_PIN, LOW);
 
-
   physStepPos += forward ? 1 : -1;
   logStepPos = stepsToLogical(physStepPos);
 }
-
 
 // ===================== BLE stuff =====================
 BLEServer* pServer = NULL;
@@ -982,8 +1031,48 @@ void loop() {
   currentRPM = gRpmFiltered;
   currentSpeedMph = rpmToMph(currentRPM);
 
+  updateStepperEnableFromSpeed(currentSpeedMph);
 
   updateLimitDebounce();
+
+  // If the limit is hit during normal operation, schedule a rehome.
+  // (This covers cases where you drift and physically touch the switch.)
+  if (!gIsHoming && limitPressed()) {
+    requestRehome("limitPressed in loop");
+  }
+
+  // Perform rehome if requested
+  if (gRehomeRequested && !gIsHoming) {
+    gRehomeRequested = false;
+
+    // Optional: pause control updates while homing
+    ControlMode prevMode = gMode;
+    gMode = MODE_IDLE;
+
+    gIsHoming = true;
+
+    // Ensure motor is enabled and use jog speed for homing
+    stepperEnable(true);
+    bool ok = homeStepper();
+
+    gIsHoming = false;
+
+    if (!ok) {
+      Serial.println("[SAFETY] Rehome failed (timeout). Holding position.");
+      // You might choose to disable motor here:
+      // stepperEnable(false);
+      gMode = MODE_IDLE;
+      tgtLogical = 0;
+    } else {
+      Serial.println("[SAFETY] Rehome complete.");
+      // After homing, return to previous mode
+      gMode = prevMode;
+
+      // Force target to current position initially to prevent sudden jump
+      tgtLogical = logStepPos;
+    }
+  }
+
 
   static uint32_t lastTargetUpdateMs = 0;
   if (millis() - lastTargetUpdateMs >= 50) { // 20 Hz target update
@@ -1031,3 +1120,4 @@ void loop() {
 
 
 }
+

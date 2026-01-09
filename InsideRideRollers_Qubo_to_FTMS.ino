@@ -108,10 +108,6 @@ static float    stepSpeedSps   = 1600.0f;
 static uint32_t stepIntervalUs = 5000;
 static uint32_t lastStepUs     = 0;
 
-
-static float jogSpeedSps = 800.0f;   // manual moves (home/jog/goto)
-static float runSpeedSps = 1600.0f;  // normal tracking moves (if you use it later)
-
 // -------- Stepper disable below speed --------
 static constexpr float SPEED_DISABLE_MPH = 2.0f;   // disable if below this
 static constexpr float SPEED_ENABLE_MPH  = 2.3f;   // re-enable above this (hysteresis)
@@ -559,17 +555,31 @@ double stepFromPowerSpeed(double xw, double yw) {
 static void stepperEnable(bool en) {
   gStepEn = en;
   digitalWrite(ENABLE_PIN, en ? LOW : HIGH);
+
+  if (en) {
+    // reset ramp timing so the first steps after enable are gentle
+    gLastDir   = 0;
+    rampCurSps = min(rampStartSps, runSpeedSps);
+    rampLastUs = micros();
+    lastStepUs = 0;
+  }
+
   Serial.printf("[STEP] enable=%s\n", en ? "ON" : "OFF");
 }
+
 
 
 static void stepperSetSpeed(float sps) {
   if (sps < 50) sps = 50;
   if (sps > 4000) sps = 4000;
-  stepSpeedSps = sps;
-  stepIntervalUs = (uint32_t)(1000000.0f / sps + 0.5f);
-  Serial.printf("[STEP] speed=%.1f sps interval=%lu us\n", stepSpeedSps, (unsigned long)stepIntervalUs);
+
+  runSpeedSps = sps;      // <-- this is the important line for soft ramp
+  stepSpeedSps = sps;     // for logging/visibility only
+  stepIntervalUs = spsToIntervalUs(sps);
+
+  Serial.printf("[STEP] target=%.1f sps interval=%lu us\n", runSpeedSps, (unsigned long)stepIntervalUs);
 }
+
 
 
 // ===================== Homing =====================
@@ -636,6 +646,10 @@ static bool homeStepper() {
 
 
   Serial.println("[HOME] Done. pos=0");
+
+  // after homing done:
+  stepperSetRunSpeed();   // restores runSpeedSps to your normal target
+
   return true;
 }
 
@@ -703,7 +717,7 @@ static void stepperUpdate() {
   // Detect direction change
   if (dir != gLastDir && gLastDir != 0) {
     gDirJustChanged = true;
-    rampCurSps = rampStartSps;
+    rampCurSps = min(rampStartSps, runSpeedSps);
     rampLastUs = micros();
   }
   gLastDir = dir;

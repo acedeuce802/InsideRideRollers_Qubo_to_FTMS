@@ -117,6 +117,31 @@ static constexpr float SPEED_DISABLE_MPH = 2.0f;   // disable if below this
 static constexpr float SPEED_ENABLE_MPH  = 2.3f;   // re-enable above this (hysteresis)
 static constexpr uint32_t SPEED_HOLDOFF_MS = 800;  // must stay below threshold this long
 
+// ===================== Soft ramp tuning =====================
+static float    runSpeedSps = 1600.0f;   // you already have this
+static float    jogSpeedSps = 800.0f;    // you already have this
+
+// Soft-start after direction change
+static float    rampStartSps    = 900.0f;   // first speed immediately after dir flip
+static float    rampAccelSps2   = 6000.0f;  // acceleration in steps/s^2 (microsteps)
+static uint32_t rampLastUs      = 0;
+static float    rampCurSps      = 900.0f;
+
+// Optional: slow down when close to target to reduce overshoot/missed steps
+static int32_t  slowZoneSteps   = 200;      // microsteps from target where we slow down
+static float    slowZoneSps     = 1000.0f;
+
+// Track direction changes
+static int8_t   gLastDir = 0;              // -1, 0, +1
+static bool     gDirJustChanged = false;
+
+// Compute interval from sps
+static inline uint32_t spsToIntervalUs(float sps) {
+  if (sps < 50.0f) sps = 50.0f;
+  if (sps > 5000.0f) sps = 5000.0f;
+  return (uint32_t)(1000000.0f / sps + 0.5f);
+}
+
 static uint32_t gBelowSpeedSinceMs = 0;
 static bool gStepperAutoDisabled = false;
 
@@ -664,33 +689,64 @@ static void stepperUpdate() {
   if (!gStepEn) return;
 
   physStepTarget = logicalToSteps(logStepTarget);
+
   if (physStepPos == physStepTarget) return;
 
-  // Safety clamp (should never trigger in normal operation)
+  // Safety clamp
   if (physStepPos < PHYS_MIN_STEPS) physStepPos = PHYS_MIN_STEPS;
   if (physStepPos > PHYS_MAX_STEPS) physStepPos = PHYS_MAX_STEPS;
 
-  uint32_t now = micros();
-  if ((now - lastStepUs) < stepIntervalUs) return;
-  lastStepUs = now;
+  // Determine direction to move
+  int32_t delta = physStepTarget - physStepPos;
+  int8_t dir = (delta > 0) ? +1 : -1;
 
-  bool forward = (physStepTarget > physStepPos);  // forward=true => away from switch
+  // Detect direction change
+  if (dir != gLastDir && gLastDir != 0) {
+    gDirJustChanged = true;
+    rampCurSps = rampStartSps;
+    rampLastUs = micros();
+  }
+  gLastDir = dir;
 
-  // --- HARD STOP: if limit is pressed, never step toward the switch ---
-  if (limitPressed() && !forward) {
-    // Freeze target and schedule rehome
-    logStepTarget = logStepPos;
-    requestRehome("stepperUpdate blocked negative step");
-    return;
+  // --- Choose current speed based on ramp + proximity slow zone ---
+  float targetSps = runSpeedSps;
+
+  // Slow zone near target (optional but recommended)
+  int32_t absDelta = (delta >= 0) ? delta : -delta;
+  if (absDelta <= slowZoneSteps) {
+    if (targetSps > slowZoneSps) targetSps = slowZoneSps;
   }
 
-  stepperSetDir(forward);
+  // Apply soft ramp (accelerate from rampCurSps -> targetSps)
+  uint32_t nowUs = micros();
+  if (rampLastUs == 0) rampLastUs = nowUs;
+  float dt = (nowUs - rampLastUs) * 1e-6f;
+  rampLastUs = nowUs;
 
+  if (rampCurSps < targetSps) {
+    rampCurSps += rampAccelSps2 * dt;
+    if (rampCurSps > targetSps) rampCurSps = targetSps;
+  } else {
+    // If target dropped (e.g., slow zone), clamp down immediately
+    rampCurSps = targetSps;
+  }
+
+  stepIntervalUs = spsToIntervalUs(rampCurSps);
+
+  // Time gate
+  if ((nowUs - lastStepUs) < stepIntervalUs) return;
+  lastStepUs = nowUs;
+
+  // Set DIR pin
+  stepperSetDir(dir > 0);
+
+  // Step pulse
   digitalWrite(STEP_PIN, HIGH);
   delayMicroseconds(2);
   digitalWrite(STEP_PIN, LOW);
 
-  physStepPos += forward ? 1 : -1;
+  // Update positions
+  physStepPos += (dir > 0) ? 1 : -1;
   logStepPos = stepsToLogical(physStepPos);
 }
 

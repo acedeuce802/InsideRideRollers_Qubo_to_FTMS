@@ -734,18 +734,30 @@ static volatile uint32_t gLastErgRxMs = 0;
 
 
 
-const uint16_t FTMSDEVICE_INDOOR_BIKE_CHARDef = 0b0000000001000100;  // flags for indoor bike data characteristics - power and cadence
+static constexpr uint16_t IB_FLAG_INSTANT_CADENCE = (1 << 2);  // Instantaneous Cadence present
+static constexpr uint16_t IB_FLAG_INSTANT_POWER   = (1 << 6);  // Instantaneous Power present
+
+static constexpr uint16_t FTMSDEVICE_INDOOR_BIKE_CHARDef =
+  (IB_FLAG_INSTANT_CADENCE | IB_FLAG_INSTANT_POWER);
+
 uint16_t speedOut = 100;
 int16_t powerOut = 100;
-uint8_t FTMSDEVICE_INDOOR_BIKE_CHARData[8] = {  // values for setup - little endian order
+
+uint8_t FTMSDEVICE_INDOOR_BIKE_CHARData[10] = {
   (uint8_t)(FTMSDEVICE_INDOOR_BIKE_CHARDef & 0xff),
   (uint8_t)(FTMSDEVICE_INDOOR_BIKE_CHARDef >> 8),
-  (uint8_t)(speedOut & 0xff),
-  (uint8_t)(speedOut >> 8),
-  (uint8_t)(speedOut & 0xff),
-  (uint8_t)(speedOut >> 8),
-  0x64,
-  0
+
+  // Instantaneous Speed (uint16, 0.01 m/s) - optional; if you aren't using it, leave 0
+  0x00, 0x00,
+
+  // Instantaneous Cadence (uint16, 0.5 rpm)
+  0x00, 0x00,
+
+  // Instantaneous Power (int16, watts)
+  0x00, 0x00,
+
+  // Padding / unused (not required; leave out if you prefer exact sizing)
+  0x00, 0x00
 };
 
 
@@ -1111,13 +1123,23 @@ void loop() {
     );
     
     
-    FTMSDEVICE_INDOOR_BIKE_CHARData[6] = (uint8_t)(currentEstPower & 0xFF);
-    FTMSDEVICE_INDOOR_BIKE_CHARData[7] = (uint8_t)(currentEstPower >> 8);
+    // cadence: 0 below 2 mph, 90 rpm above 2 mph
+    uint16_t cadence_rpm = (currentSpeedMph < 2.0f) ? 0 : 90;
+    uint16_t cadence_ftms = cadence_rpm * 2; // 0.5 rpm units
 
-    pIndoorBike->setValue(FTMSDEVICE_INDOOR_BIKE_CHARData, 8);
+    // write cadence at bytes [4..5] (per layout above)
+    FTMSDEVICE_INDOOR_BIKE_CHARData[4] = (uint8_t)(cadence_ftms & 0xFF);
+    FTMSDEVICE_INDOOR_BIKE_CHARData[5] = (uint8_t)(cadence_ftms >> 8);
+
+    // write power at bytes [6..7]
+    int16_t p = (int16_t)constrain(currentEstPower, 0, 2000);
+    FTMSDEVICE_INDOOR_BIKE_CHARData[6] = (uint8_t)(p & 0xFF);
+    FTMSDEVICE_INDOOR_BIKE_CHARData[7] = (uint8_t)((uint16_t)p >> 8);
+
+    // notify with correct length (10)
+    pIndoorBike->setValue(FTMSDEVICE_INDOOR_BIKE_CHARData, sizeof(FTMSDEVICE_INDOOR_BIKE_CHARData));
     pIndoorBike->notify();
+
   }
-
-
 }
 

@@ -44,6 +44,8 @@ enum ControlMode : uint8_t {
 #include <WebServer.h>
 #include <Update.h>
 
+static const char* FW_VERSION = "2026-01-09_02";  // change each build
+
 // -------------------- SoftAP config --------------------
 static const char* AP_SSID = "InsideRideCal";
 static const char* AP_PASS = "insideride"; // >= 8 chars
@@ -71,6 +73,13 @@ static void handleGotoHold();
 static void handleResumeZwift();
 static void handleUpdateForm();
 static void handleUpdateUpload();
+
+static volatile bool gOtaInProgress = false;
+static uint32_t gOtaLastProgressMs = 0;
+static size_t gOtaBytes = 0;
+static volatile bool gOtaDone = false;
+static volatile bool gOtaOk = false;
+static String gOtaErr;
 
 // ===================== Grid size =====================
 constexpr int mph_N = 6;
@@ -313,8 +322,9 @@ static void startApAndWeb() {
   server.on("/resume_zwift", HTTP_POST, handleResumeZwift);
 
   // OTA endpoints
+    // OTA endpoints (CORRECT PATTERN)
   server.on("/update", HTTP_GET, handleUpdateForm);
-  server.on("/update", HTTP_POST, []() { /* finalizer handled in upload cb */ }, handleUpdateUpload);
+  server.on("/update", HTTP_POST, handleUpdatePostFinalizer, handleUpdateUpload);
 
   server.begin();
   Serial.println("[HTTP] Server started");
@@ -1167,6 +1177,8 @@ static void handleRoot() {
           "<button type='submit'>Resume Software Control</button>"
           "</form>";
 
+  html += "<p><b>FW:</b> " + String(FW_VERSION) + "</p>";
+
   html += "</body></html>";
   server.send(200, "text/html", html);
 }
@@ -1260,48 +1272,88 @@ static void handleUpdateForm() {
 
 // ---- OTA upload ----
 static void handleUpdateUpload() {
+  HTTPUpload& upload = server.upload();
+
+  if (upload.status == UPLOAD_FILE_START) {
+    if (!server.authenticate(OTA_USER, OTA_PASS)) return;
+
+    if (!otaIsUnlocked()) { gOtaErr = "OTA locked"; return; }
+
+    otaUnlockedUntilMs = 0; // consume unlock
+    gOtaInProgress = true;
+    gOtaDone = false;
+    gOtaOk = false;
+    gOtaErr = "";
+
+    Serial.printf("[OTA] Upload start: %s\n", upload.filename.c_str());
+
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+      gOtaErr = "Update.begin failed";
+      Serial.print("[OTA] ");
+      Update.printError(Serial);
+      gOtaInProgress = false;
+    } else {
+      Serial.println("[OTA] Update.begin OK");
+    }
+  }
+  else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (!gOtaInProgress) return;
+
+    size_t w = Update.write(upload.buf, upload.currentSize);
+    if (w != upload.currentSize) {
+      gOtaErr = "Update.write failed";
+      Serial.print("[OTA] ");
+      Update.printError(Serial);
+    }
+    yield();
+  }
+  else if (upload.status == UPLOAD_FILE_END) {
+    if (!gOtaInProgress) return;
+
+    if (Update.end(true)) {
+      gOtaOk = true;
+      Serial.printf("[OTA] Upload end: %u bytes OK\n", (unsigned)upload.totalSize);
+    } else {
+      gOtaOk = false;
+      gOtaErr = "Update.end failed";
+      Serial.print("[OTA] ");
+      Update.printError(Serial);
+    }
+
+    gOtaDone = true;
+    gOtaInProgress = false;
+  }
+  else if (upload.status == UPLOAD_FILE_ABORTED) {
+    Update.end();
+    gOtaErr = "Upload aborted";
+    gOtaDone = true;
+    gOtaOk = false;
+    gOtaInProgress = false;
+    Serial.println("[OTA] Upload aborted");
+  }
+}
+
+static void handleUpdatePostFinalizer() {
   if (!server.authenticate(OTA_USER, OTA_PASS)) {
     return server.requestAuthentication();
   }
 
-  if (!otaIsUnlocked()) {
-    server.send(403, "text/plain", "OTA is LOCKED. Press CAL to unlock, then retry.");
+  if (!gOtaDone) {
+    // Should not happen often, but keeps behavior deterministic
+    server.send(500, "text/plain", "OTA not completed.");
     return;
   }
 
-  HTTPUpload& upload = server.upload();
-
-  if (upload.status == UPLOAD_FILE_START) {
-    Serial.printf("[OTA] Upload start: %s\n", upload.filename.c_str());
-
-    // One-shot unlock: consume the window once an upload starts
-    otaUnlockedUntilMs = 0;
-
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-      Update.printError(Serial);
-    }
-  }
-  else if (upload.status == UPLOAD_FILE_WRITE) {
-    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-      Update.printError(Serial);
-    }
-  }
-  else if (upload.status == UPLOAD_FILE_END) {
-    if (Update.end(true)) {
-      Serial.printf("[OTA] Success (%u bytes). Rebooting...\n", upload.totalSize);
-      server.send(200, "text/plain", "Update OK. Rebooting...");
-      delay(250);
-      ESP.restart();
-    } else {
-      Update.printError(Serial);
-      server.send(500, "text/plain", "Update failed.");
-    }
-  }
-  else if (upload.status == UPLOAD_FILE_ABORTED) {
-    Update.end();
-    server.send(500, "text/plain", "Upload aborted.");
+  if (gOtaOk) {
+    server.send(200, "text/plain", "Update OK. Rebooting...");
+    delay(250);
+    ESP.restart();
+  } else {
+    String msg = "Update failed: " + gOtaErr;
+    server.send(500, "text/plain", msg);
   }
 }
+
 
 void setup() {
   Serial.begin(115200);
@@ -1333,6 +1385,7 @@ void setup() {
 
   attachInterrupt(digitalPinToInterrupt(HALL_PIN), hallISR, FALLING);
 
+  Serial.printf("[FW] %s\n", FW_VERSION);
 
   //Setup BLE
   Serial.println("Creating BLE server...");
@@ -1406,6 +1459,15 @@ void setup() {
 
 
 void loop() {
+  server.handleClient();
+
+  // If OTA is running, do not do BLE notify / stepper / heavy Serial prints.
+  // Keep loop tight so WiFi can receive upload data reliably.
+  if (gOtaInProgress) {
+    delay(1);   // cooperative yield
+    return;
+  }
+
   const uint32_t nowMs = millis();
   static uint32_t delayMs = 0;
   const int printTime = 1000;
@@ -1414,13 +1476,11 @@ void loop() {
   static uint32_t lastPowerNotifyMs = 0;
   const uint32_t POWER_NOTIFY_PERIOD_MS = 100; // 10 Hz
 
-
   if (millis() - delayMs >= printTime){
     printDiag();
-    Serial.printf("simAgeMs=%lu\n", (unsigned long)(millis() - gLastSimRxMs));
+    /*Serial.printf("simAgeMs=%lu\n", (unsigned long)(millis() - gLastSimRxMs));*/
     delayMs = millis();
   }
-
 
   float rpmRaw = readRPM();
   static uint32_t lastIbDataMs = 0;
@@ -1431,6 +1491,7 @@ void loop() {
   float dtS = (nowMs - gLastRpmFilterMs) * 0.001f;
   gLastRpmFilterMs = nowMs;
 
+  
 
   // alpha = dt / (tau + dt)
   float alpha = (dtS <= 0) ? 1.0f : (dtS / (RPM_FILTER_TAU_S + dtS));
@@ -1553,8 +1614,6 @@ void loop() {
     pIndoorBike->notify();
 
   }
-
-  server.handleClient();
 
   // Press CAL to unlock OTA window
   if (calPressedEdge()) {

@@ -40,6 +40,37 @@ enum ControlMode : uint8_t {
 #include <BLEUtils.h>
 #include <BLE2902.h>
 
+#include <WiFi.h>
+#include <WebServer.h>
+#include <Update.h>
+
+// -------------------- SoftAP config --------------------
+static const char* AP_SSID = "InsideRideCal";
+static const char* AP_PASS = "insideride"; // >= 8 chars
+
+// -------------------- HTTP server --------------------
+static WebServer server(80);
+
+// -------------------- OTA lock window --------------------
+static constexpr uint32_t OTA_UNLOCK_WINDOW_MS = 60 * 1000; // 60 seconds
+static uint32_t otaUnlockedUntilMs = 0;
+
+// Optional Basic Auth for OTA
+static const char* OTA_USER = "admin";
+static const char* OTA_PASS = "change-me";
+
+// Manual override latch
+static volatile bool   gManualHoldActive = false;
+static volatile int32_t gManualHoldTarget = 0;   // logical units 0..1000
+
+static void handleRoot();
+static void handleDiagJson();
+static void handleGoto();
+static void handleEnable();
+static void handleGotoHold();
+static void handleResumeZwift();
+static void handleUpdateForm();
+static void handleUpdateUpload();
 
 // ===================== Grid size =====================
 constexpr int mph_N = 6;
@@ -242,6 +273,52 @@ static inline void updateLimitDebounce() {
 }
 static inline bool limitPressed() { return gLimitStable == 0; }
 
+static bool calPressedEdge() {
+  static uint8_t lastStable = HIGH;
+  static uint8_t lastRaw = HIGH;
+  static uint32_t lastChange = 0;
+  static bool latched = false;
+
+  uint8_t raw = digitalRead(CAL_BTN_PIN);
+  uint32_t now = millis();
+
+  if (raw != lastRaw) { lastRaw = raw; lastChange = now; }
+  if ((now - lastChange) > 30) lastStable = lastRaw; // 30ms debounce
+
+  if (lastStable == LOW && !latched) { latched = true; return true; }
+  if (lastStable == HIGH) latched = false;
+  return false;
+}
+
+// ===================== WebServer Go-To =====================
+static inline int32_t clampLogical(int32_t v) {
+  if (v < LOGICAL_MIN) return LOGICAL_MIN;
+  if (v > LOGICAL_MAX) return LOGICAL_MAX;
+  return v;
+}
+
+static void startApAndWeb() {
+  WiFi.mode(WIFI_AP);
+  bool ok = WiFi.softAP(AP_SSID, AP_PASS);
+  Serial.printf("[WiFi] SoftAP start %s\n", ok ? "OK" : "FAILED");
+  Serial.print("[WiFi] AP IP: ");
+  Serial.println(WiFi.softAPIP());
+
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/diag.json", HTTP_GET, handleDiagJson);
+  server.on("/goto", HTTP_GET, handleGoto);
+  server.on("/enable", HTTP_GET, handleEnable);
+
+  server.on("/goto_hold", HTTP_GET, handleGotoHold);
+  server.on("/resume_zwift", HTTP_POST, handleResumeZwift);
+
+  // OTA endpoints
+  server.on("/update", HTTP_GET, handleUpdateForm);
+  server.on("/update", HTTP_POST, []() { /* finalizer handled in upload cb */ }, handleUpdateUpload);
+
+  server.begin();
+  Serial.println("[HTTP] Server started");
+}
 
 // ===================== Hall / RPM =====================
 // Assumes 1 pulse per revolution
@@ -952,6 +1029,7 @@ class ControlPointCallbacks : public BLECharacteristicCallbacks {
         gradeFloat = gradeRaw / 100.0f;
         if (gradeFloat < 0) gradeFloat *= 2.0f;
 
+
         tgtLogical = gradeToSteps(gradeFloat); // update immediately on SIM packet
         gLastSimRxMs = millis();
         gMode = MODE_SIM;                      // <<< mode set here
@@ -970,6 +1048,260 @@ class ControlPointCallbacks : public BLECharacteristicCallbacks {
   }
 };
 
+static inline bool otaIsUnlocked() {
+  return otaUnlockedUntilMs != 0 && (int32_t)(otaUnlockedUntilMs - millis()) > 0;
+}
+
+static void otaUnlockNow() {
+  otaUnlockedUntilMs = millis() + OTA_UNLOCK_WINDOW_MS;
+  Serial.printf("[OTA] Unlocked for %lu ms\n", (unsigned long)OTA_UNLOCK_WINDOW_MS);
+}
+
+static String htmlEscape(const String& in) {
+  String s = in;
+  s.replace("&", "&amp;");
+  s.replace("<", "&lt;");
+  s.replace(">", "&gt;");
+  s.replace("\"", "&quot;");
+  s.replace("'", "&#39;");
+  return s;
+}
+
+// ---- JSON diagnostics ----
+static void handleDiagJson() {
+  String json = "{";
+
+  json += "\"mode\":\"" + String(modeName(gMode)) + "\",";
+  json += "\"grade\":" + String(gradeFloat, 2) + ",";
+  json += "\"speed_mph\":" + String(currentSpeedMph, 2) + ",";
+  json += "\"est_power_w\":" + String(currentEstPower) + ",";
+  json += "\"erg_target_w\":" + String((int)ergTargetW) + ",";
+
+  json += "\"log_pos\":" + String((long)logStepPos) + ",";
+  json += "\"log_tgt\":" + String((long)logStepTarget) + ",";
+  json += "\"phys_pos\":" + String((long)physStepPos) + ",";
+  json += "\"phys_tgt\":" + String((long)logicalToSteps(logStepTarget)) + ",";
+
+  json += "\"run_sps\":" + String(runSpeedSps, 1) + ",";
+  json += "\"step_enabled\":" + String(gStepEn ? "true" : "false") + ",";
+  json += "\"limit_pressed\":" + String(limitPressed() ? "true" : "false") + ",";
+  json += "\"ota_unlocked\":" + String(otaIsUnlocked() ? "true" : "false") + ",";
+
+  json += "\"ap_ip\":\"" + WiFi.softAPIP().toString() + "\"";
+
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+// ---- HTML main page with diagnostics and goto form ----
+static void handleRoot() {
+  String html;
+  html.reserve(2200);
+
+  html += "<!doctype html><html><head><meta charset='utf-8'>";
+  html += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
+  html += "<title>InsideRide Controller</title></head><body>";
+  html += "<h2>InsideRide Controller</h2>";
+
+  html += "<p><b>AP IP:</b> " + WiFi.softAPIP().toString() + "</p>";
+  html += "<p><b>Mode:</b> " + String(modeName(gMode)) + "</p>";
+
+  html += "<h3>Diagnostics</h3><pre>";
+  html += "Grade: " + String(gradeFloat, 2) + " %\n";
+  html += "Speed: " + String(currentSpeedMph, 2) + " MPH\n";
+  html += "Est Power: " + String(currentEstPower) + " W\n";
+  html += "ERG Target: " + String((int)ergTargetW) + " W\n";
+  html += "\n";
+  html += "Log Pos: " + String((long)logStepPos) + " / Tgt: " + String((long)logStepTarget) + "\n";
+  html += "Phys Pos: " + String((long)physStepPos) + " / Tgt: " + String((long)logicalToSteps(logStepTarget)) + "\n";
+  html += "Run Speed: " + String(runSpeedSps, 1) + " steps/s\n";
+  html += "Stepper Enabled: " + String(gStepEn ? "YES" : "NO") + "\n";
+  html += "Limit Pressed: " + String(limitPressed() ? "YES" : "NO") + "\n";
+  html += "OTA: " + String(otaIsUnlocked() ? "UNLOCKED" : "LOCKED (press CAL)") + "\n";
+  html += "</pre>";
+
+  html += "<p><a href='/diag.json'>/diag.json</a></p>";
+
+  html += "<h3>Actions</h3>";
+  html += "<ul>";
+  html += "<li><a href='/enable?on=1'>Enable stepper</a></li>";
+  html += "<li><a href='/enable?on=0'>Disable stepper</a></li>";
+  html += "<li><a href='/update'>Firmware Update (locked unless CAL pressed)</a></li>";
+  html += "</ul>";
+
+  html += "<p><b>Mode:</b> ";
+  html += modeName(gMode);
+  html += "</p>";
+
+  html += "<p><b>Manual Hold:</b> ";
+  html += (gManualHoldActive ? "ACTIVE" : "OFF");
+  html += " | <b>Hold Target:</b> ";
+  html += String((long)gManualHoldTarget);
+  html += "</p>";
+
+  html += "<p><b>Speed:</b> ";
+  html += String(currentSpeedMph, 2);
+  html += " MPH | <b>Grade:</b> ";
+  html += String(gradeFloat, 2);
+  html += "% | <b>ERG Target:</b> ";
+  html += String((int)ergTargetW);
+  html += " W</p>";
+
+  html += "<p><b>Pos:</b> ";
+  html += String((long)logStepPos);
+  html += " | <b>Tgt:</b> ";
+  html += String((long)logStepTarget);
+  html += "</p>";
+
+  html += "<hr/>";
+
+  // Go-To Hold form
+  html += "<form action='/goto_hold' method='GET'>"
+          "<label>Go-To (logical 0-1000):</label><br/>"
+          "<input name='pos' type='number' min='0' max='1000' step='1' value='500'/>"
+          "<button type='submit'>Go-To (Hold)</button>"
+          "</form>";
+
+  // Resume button
+  html += "<form action='/resume_zwift' method='POST' style='margin-top:10px;'>"
+          "<button type='submit'>Resume Software Control</button>"
+          "</form>";
+
+  html += "</body></html>";
+  server.send(200, "text/html", html);
+}
+
+// ---- Go-to handler ----
+static void handleGoto() {
+  if (!server.hasArg("pos")) {
+    server.send(400, "text/plain", "Missing pos. Use /goto?pos=500");
+    return;
+  }
+  long pos = server.arg("pos").toInt();
+  if (pos < LOGICAL_MIN) pos = LOGICAL_MIN;
+  if (pos > LOGICAL_MAX) pos = LOGICAL_MAX;
+
+  stepperEnable(true);     // optional: auto-enable on goto
+  stepperGoto((int32_t)pos);
+
+  server.sendHeader("Location", "/");
+  server.send(302, "text/plain", "OK");
+}
+
+static void handleGotoHold() {
+  if (!server.hasArg("pos")) {
+    server.send(400, "text/plain", "Missing pos");
+    return;
+  }
+
+  int32_t pos = (int32_t)server.arg("pos").toInt();
+  pos = clampLogical(pos);
+
+  gManualHoldTarget = pos;
+  gManualHoldActive = true;
+
+  // Optional: ensure stepper enabled when user commands a hold
+  stepperEnable(true);
+
+  Serial.printf("[WEB] Manual HOLD active: target=%ld\n", (long)pos);
+
+  // Redirect back to root
+  server.sendHeader("Location", "/", true);
+  server.send(303);
+}
+
+static void handleResumeZwift() {
+  gManualHoldActive = false;
+
+  Serial.println("[WEB] Manual HOLD cleared; returning to Zwift control.");
+
+  server.sendHeader("Location", "/", true);
+  server.send(303);
+}
+
+// ---- Enable/disable handler ----
+static void handleEnable() {
+  if (!server.hasArg("on")) {
+    server.send(400, "text/plain", "Missing on. Use /enable?on=1 or /enable?on=0");
+    return;
+  }
+  int on = server.arg("on").toInt();
+  stepperEnable(on != 0);
+
+  server.sendHeader("Location", "/");
+  server.send(302, "text/plain", "OK");
+}
+
+// ---- OTA form ----
+static void handleUpdateForm() {
+  if (!server.authenticate(OTA_USER, OTA_PASS)) {
+    return server.requestAuthentication();
+  }
+
+  if (!otaIsUnlocked()) {
+    server.send(403, "text/plain",
+                "OTA is LOCKED. Press CAL to unlock for 60 seconds, then refresh /update.");
+    return;
+  }
+
+  const char* form =
+    "<!doctype html><html><body>"
+    "<h3>Firmware Update</h3>"
+    "<p>OTA is UNLOCKED. Choose a .bin and upload.</p>"
+    "<form method='POST' action='/update' enctype='multipart/form-data'>"
+    "<input type='file' name='firmware'>"
+    "<input type='submit' value='Update'>"
+    "</form>"
+    "<p>Device will reboot automatically after success.</p>"
+    "</body></html>";
+
+  server.send(200, "text/html", form);
+}
+
+// ---- OTA upload ----
+static void handleUpdateUpload() {
+  if (!server.authenticate(OTA_USER, OTA_PASS)) {
+    return server.requestAuthentication();
+  }
+
+  if (!otaIsUnlocked()) {
+    server.send(403, "text/plain", "OTA is LOCKED. Press CAL to unlock, then retry.");
+    return;
+  }
+
+  HTTPUpload& upload = server.upload();
+
+  if (upload.status == UPLOAD_FILE_START) {
+    Serial.printf("[OTA] Upload start: %s\n", upload.filename.c_str());
+
+    // One-shot unlock: consume the window once an upload starts
+    otaUnlockedUntilMs = 0;
+
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+      Update.printError(Serial);
+    }
+  }
+  else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+      Update.printError(Serial);
+    }
+  }
+  else if (upload.status == UPLOAD_FILE_END) {
+    if (Update.end(true)) {
+      Serial.printf("[OTA] Success (%u bytes). Rebooting...\n", upload.totalSize);
+      server.send(200, "text/plain", "Update OK. Rebooting...");
+      delay(250);
+      ESP.restart();
+    } else {
+      Update.printError(Serial);
+      server.send(500, "text/plain", "Update failed.");
+    }
+  }
+  else if (upload.status == UPLOAD_FILE_ABORTED) {
+    Update.end();
+    server.send(500, "text/plain", "Upload aborted.");
+  }
+}
 
 void setup() {
   Serial.begin(115200);
@@ -1059,6 +1391,7 @@ void setup() {
 
   Serial.println("connection...");
 
+  startApAndWeb();
 
 }
 
@@ -1177,8 +1510,17 @@ void loop() {
   // else SIM: gTgtLogical is updated in case 0x11 (or you can compute here from gradeFloat)
   }
   
-  stepperGoto(tgtLogical);
+  int32_t target;
+
+  if (gManualHoldActive) {
+    target = gManualHoldTarget;     // manual override wins
+  } else {
+    target = tgtLogical;            // Zwift control (ERG/SIM)
+  }
+
+  stepperGoto(target);
   stepperUpdate();
+
 
 
   if (deviceConnected && millis() - lastPowerNotifyMs >= POWER_NOTIFY_PERIOD_MS) {
@@ -1211,5 +1553,13 @@ void loop() {
     pIndoorBike->notify();
 
   }
+
+  server.handleClient();
+
+  // Press CAL to unlock OTA window
+  if (calPressedEdge()) {
+    otaUnlockNow();
+  }
+
 }
 

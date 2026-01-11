@@ -31,7 +31,7 @@ enum ControlMode : uint8_t {
 #include <esp_partition.h>
 #include <esp_system.h>
 
-static const char* FW_VERSION = "2026-01-10_03";  // change each build
+static const char* FW_VERSION = "2026-01-10_04";  // change each build
 
 // -------------------- SoftAP config --------------------
 static const char* AP_SSID = "InsideRideCal";
@@ -143,7 +143,7 @@ static inline int32_t stepsToLogical(int32_t steps) {
 
 
 // ===================== Stepper motion =====================
-static float    stepSpeedSps   = 1600.0f;
+static float    stepSpeedSps   = 2500.0f;
 static uint32_t stepIntervalUs = 5000;
 static uint32_t lastStepUs     = 0;
 
@@ -153,7 +153,7 @@ static constexpr float SPEED_ENABLE_MPH  = 2.3f;   // re-enable above this (hyst
 static constexpr uint32_t SPEED_HOLDOFF_MS = 800;  // must stay below threshold this long
 
 // ===================== Soft ramp tuning =====================
-static float    runSpeedSps = 1600.0f;   // you already have this
+static float    runSpeedSps = 2500.0f;   // you already have this
 static float    jogSpeedSps = 800.0f;    // you already have this
 
 // Soft-start after direction change
@@ -1463,7 +1463,7 @@ void setup() {
   Serial.println("Starting initialisation routine");
 
 
-  runSpeedSps = 1600.0f;
+  runSpeedSps = 2500.0f;
   jogSpeedSps = 1600.0f;
   stepperSetRunSpeed();   // safer at boot for homing
 

@@ -1,33 +1,16 @@
 /*
-   A BLE turbo trainer controller for Zwift
+   Original work: A BLE turbo trainer controller for Zwift
 
-
-   Program receives environment date from the Zwift game (via BLE) and adjusts the resistance of a turbo trainer using a stepper motor
-   Uses an ESP32 and includes an LCD display for feedback.
-
-
-   Copyright 2020 Peter Everett
+   Copyright (c) 2020 Peter Everett
    v1.0 Aug 2020 - Initial version
 
+   Substantial modifications and new code:
+   Copyright (c) 2024–2026 Adam Watson
 
-   This work is licensed the GNU General Public License v3 (GPL-3)
-   Modified for Proform TDF bike generation 2 by Greg Masik April 1, 2021. Removed stepper motor and LCD display
-   April 28, modified to allow for zwift half grade for negative grades. May 10, 2021 added I2C LCD display for grade.
-   January 5, 2022- Added case 0x01 to allow for reset request from Zwift after Dec 2021 update.
-
-
-   Modified by Adam Watson January 3rd, 2024:
-     Only kept BLE interface for FTMS from source code.  
-     Added case 0x05 for ERG mode control for ESP32 to receive target power
-     Added hall sensor input to calculate RPM of cycling rollers and smooth with an averaged array
-     Added servo control, to control magnetic resistance to cycling rollers
-     Added bilinear interpolation for inputs speed and target power, and output servo position
-
-
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, version 3.
 */
-
-
-//Tested with Xiao ESP32-C3
 
 enum ControlMode : uint8_t {
   MODE_IDLE = 0,
@@ -44,7 +27,11 @@ enum ControlMode : uint8_t {
 #include <WebServer.h>
 #include <Update.h>
 
-static const char* FW_VERSION = "2026-01-09_02";  // change each build
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
+#include <esp_system.h>
+
+static const char* FW_VERSION = "2026-01-10_03";  // change each build
 
 // -------------------- SoftAP config --------------------
 static const char* AP_SSID = "InsideRideCal";
@@ -80,6 +67,18 @@ static size_t gOtaBytes = 0;
 static volatile bool gOtaDone = false;
 static volatile bool gOtaOk = false;
 static String gOtaErr;
+
+// OTA runtime state
+static uint32_t gOtaExpectedSize = 0;
+static uint32_t gOtaWritten = 0;
+static uint8_t  gOtaLastPct = 255;
+
+// Policy knobs
+static constexpr bool OTA_DENY_WHEN_BLE_CONNECTED = true;  // your request
+
+static constexpr bool  OTA_REQUIRE_LOW_SPEED = true;
+static constexpr float OTA_MAX_SPEED_MPH     = 1.0f;   // must be <= this to OTA
+
 
 // ===================== Grid size =====================
 constexpr int mph_N = 6;
@@ -1058,6 +1057,34 @@ class ControlPointCallbacks : public BLECharacteristicCallbacks {
   }
 };
 
+static void otaMarkAppValidAfterBoot() {
+  // If rollback is enabled in the bootloader, new OTA images boot as "pending verify".
+  // Once we decide things look good, we mark valid to cancel rollback.
+  esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+  if (err == ESP_OK) {
+    Serial.println("[OTA] App marked VALID (rollback canceled if pending).");
+  } else if (err == ESP_ERR_OTA_ROLLBACK_INVALID_STATE) {
+    // Normal if rollback isn’t enabled or app isn't in pending state.
+    Serial.println("[OTA] Rollback not pending (or not enabled).");
+  } else {
+    Serial.printf("[OTA] Mark valid failed: %d\n", (int)err);
+  }
+}
+
+static const esp_partition_t* getNextOtaPartition() {
+  return esp_ota_get_next_update_partition(nullptr);
+}
+
+static void otaPrintProgress(uint32_t written, uint32_t total) {
+  if (total == 0) return;
+  uint8_t pct = (uint8_t)((written * 100UL) / total);
+  if (pct != gOtaLastPct && (pct % 5 == 0 || pct == 100)) { // every 5%
+    gOtaLastPct = pct;
+    Serial.printf("[OTA] Progress: %u%% (%lu/%lu)\n",
+                  (unsigned)pct, (unsigned long)written, (unsigned long)total);
+  }
+}
+
 static inline bool otaIsUnlocked() {
   return otaUnlockedUntilMs != 0 && (int32_t)(otaUnlockedUntilMs - millis()) > 0;
 }
@@ -1128,6 +1155,7 @@ static void handleRoot() {
   html += "Stepper Enabled: " + String(gStepEn ? "YES" : "NO") + "\n";
   html += "Limit Pressed: " + String(limitPressed() ? "YES" : "NO") + "\n";
   html += "OTA: " + String(otaIsUnlocked() ? "UNLOCKED" : "LOCKED (press CAL)") + "\n";
+  html += "OTA Speed Gate: <= " + String(OTA_MAX_SPEED_MPH, 2) + " MPH\n";
   html += "</pre>";
 
   html += "<p><a href='/diag.json'>/diag.json</a></p>";
@@ -1256,82 +1284,142 @@ static void handleUpdateForm() {
     return;
   }
 
-  const char* form =
+  if (OTA_DENY_WHEN_BLE_CONNECTED && deviceConnected) {
+    server.send(423, "text/plain",
+                "OTA is disabled while BLE is connected. Disconnect Zwift, then retry.");
+    return;
+  }
+  
+  if (OTA_REQUIRE_LOW_SPEED && (currentSpeedMph > OTA_MAX_SPEED_MPH)) {
+    String msg = "OTA is disabled while moving. Current speed is " +
+                 String(currentSpeedMph, 2) + " MPH. Stop the wheel (<= " +
+                 String(OTA_MAX_SPEED_MPH, 2) + " MPH) and retry.";
+    server.send(423, "text/plain", msg);
+    return;
+  }
+  const esp_partition_t* p = getNextOtaPartition();
+  String partInfo = p ? String((unsigned long)p->size) : String("unknown");
+
+  String html =
     "<!doctype html><html><body>"
     "<h3>Firmware Update</h3>"
-    "<p>OTA is UNLOCKED. Choose a .bin and upload.</p>"
+    "<p>OTA is UNLOCKED.</p>"
+    "<p><b>Next OTA partition size:</b> " + partInfo + " bytes</p>"
     "<form method='POST' action='/update' enctype='multipart/form-data'>"
     "<input type='file' name='firmware'>"
     "<input type='submit' value='Update'>"
     "</form>"
-    "<p>Device will reboot automatically after success.</p>"
+    "<p>Note: BLE must be disconnected during OTA.</p>"
     "</body></html>";
 
-  server.send(200, "text/html", form);
+  server.send(200, "text/html", html);
 }
+
 
 // ---- OTA upload ----
 static void handleUpdateUpload() {
+  if (!server.authenticate(OTA_USER, OTA_PASS)) {
+    return server.requestAuthentication();
+  }
+
   HTTPUpload& upload = server.upload();
 
   if (upload.status == UPLOAD_FILE_START) {
-    if (!server.authenticate(OTA_USER, OTA_PASS)) return;
 
-    if (!otaIsUnlocked()) { gOtaErr = "OTA locked"; return; }
+    // Gate checks ONLY here
+    if (!otaIsUnlocked()) {
+      gOtaInProgress = false;
+      gOtaDone = true; gOtaOk = false; gOtaErr = "OTA locked (press CAL)";
+      return;
+    }
+    if (OTA_DENY_WHEN_BLE_CONNECTED && deviceConnected) {
+      gOtaInProgress = false;
+      gOtaDone = true; gOtaOk = false; gOtaErr = "BLE connected; OTA denied";
+      return;
+    }
+    if (OTA_REQUIRE_LOW_SPEED && (currentSpeedMph > OTA_MAX_SPEED_MPH)) {
+      gOtaInProgress = false;
+      gOtaDone = true; gOtaOk = false; gOtaErr = "Moving too fast for OTA";
+      return;
+    }
 
-    otaUnlockedUntilMs = 0; // consume unlock
-    gOtaInProgress = true;
-    gOtaDone = false;
-    gOtaOk = false;
-    gOtaErr = "";
+    // Optional: reject a second start while one is running
+    if (gOtaInProgress) {
+      Update.abort();
+      gOtaInProgress = false;
+    }
 
     Serial.printf("[OTA] Upload start: %s\n", upload.filename.c_str());
 
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-      gOtaErr = "Update.begin failed";
-      Serial.print("[OTA] ");
-      Update.printError(Serial);
+    // Consume unlock once upload is accepted
+    otaUnlockedUntilMs = 0;
+
+    gOtaDone = false; gOtaOk = false; gOtaErr = "";
+    gOtaInProgress = true;
+
+    stepperEnable(false);
+    gOtaWritten = 0;
+    gOtaLastPct = 255;
+
+    const esp_partition_t* part = getNextOtaPartition();
+    if (!part) {
+      Update.abort();
+      gOtaDone = true; gOtaOk = false; gOtaErr = "No OTA partition found";
       gOtaInProgress = false;
-    } else {
-      Serial.println("[OTA] Update.begin OK");
+      return;
     }
-  }
-  else if (upload.status == UPLOAD_FILE_WRITE) {
-    if (!gOtaInProgress) return;
 
+    gOtaExpectedSize = (uint32_t)part->size;
+
+    if (!Update.begin(gOtaExpectedSize)) {
+      Serial.print("[OTA] Update.begin FAILED: ");
+      Update.printError(Serial);
+      gOtaDone = true; gOtaOk = false; gOtaErr = "Update.begin failed";
+      gOtaInProgress = false;
+      return;
+    }
+
+    Serial.printf("[OTA] Update.begin OK. slot_size=%lu\n", (unsigned long)gOtaExpectedSize);
+    return;
+  }
+
+  // For WRITE/END/ABORTED: do NOT check otaIsUnlocked() again
+  if (!gOtaInProgress) {
+    // Stray callbacks; ignore
+    return;
+  }
+
+  if (upload.status == UPLOAD_FILE_WRITE) {
     size_t w = Update.write(upload.buf, upload.currentSize);
-    if (w != upload.currentSize) {
-      gOtaErr = "Update.write failed";
-      Serial.print("[OTA] ");
-      Update.printError(Serial);
-    }
-    yield();
+    gOtaWritten += (uint32_t)w;
+    otaPrintProgress(gOtaWritten, gOtaExpectedSize);
+    return;
   }
-  else if (upload.status == UPLOAD_FILE_END) {
-    if (!gOtaInProgress) return;
 
-    if (Update.end(true)) {
-      gOtaOk = true;
-      Serial.printf("[OTA] Upload end: %u bytes OK\n", (unsigned)upload.totalSize);
-    } else {
-      gOtaOk = false;
-      gOtaErr = "Update.end failed";
-      Serial.print("[OTA] ");
+  if (upload.status == UPLOAD_FILE_END) {
+    if (!Update.end(true)) {
+      Serial.print("[OTA] Update.end FAILED: ");
       Update.printError(Serial);
+      gOtaDone = true; gOtaOk = false; gOtaErr = "Update.end failed";
+      gOtaInProgress = false;
+      return;
     }
 
-    gOtaDone = true;
+    gOtaDone = true; gOtaOk = true;
     gOtaInProgress = false;
+    Serial.println("[OTA] Success, awaiting finalizer response...");
+    return;
   }
-  else if (upload.status == UPLOAD_FILE_ABORTED) {
-    Update.end();
-    gOtaErr = "Upload aborted";
-    gOtaDone = true;
-    gOtaOk = false;
+
+  if (upload.status == UPLOAD_FILE_ABORTED) {
+    Serial.println("[OTA] Upload aborted.");
+    Update.abort();
+    gOtaDone = true; gOtaOk = false; gOtaErr = "Upload aborted";
     gOtaInProgress = false;
-    Serial.println("[OTA] Upload aborted");
+    return;
   }
 }
+
 
 static void handleUpdatePostFinalizer() {
   if (!server.authenticate(OTA_USER, OTA_PASS)) {
@@ -1359,6 +1447,7 @@ void setup() {
   Serial.begin(115200);
   delay(100);
 
+  otaMarkAppValidAfterBoot();
 
   pinMode(STEP_PIN, OUTPUT);
   pinMode(DIR_PIN, OUTPUT);
@@ -1464,7 +1553,8 @@ void loop() {
   // If OTA is running, do not do BLE notify / stepper / heavy Serial prints.
   // Keep loop tight so WiFi can receive upload data reliably.
   if (gOtaInProgress) {
-    delay(1);   // cooperative yield
+    // Only service web + button (optional) while uploading.
+    delay(1);
     return;
   }
 

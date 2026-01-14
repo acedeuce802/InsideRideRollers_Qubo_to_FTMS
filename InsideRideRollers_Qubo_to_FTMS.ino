@@ -31,7 +31,7 @@ enum ControlMode : uint8_t {
 #include <esp_partition.h>
 #include <esp_system.h>
 
-static const char* FW_VERSION = "2026-01-13_01";  // change each build
+static const char* FW_VERSION = "2026-01-13_02";  // change each build
 
 // -------------------- SoftAP config --------------------
 static const char* AP_SSID = "InsideRideCal";
@@ -1132,14 +1132,6 @@ class ControlPointCallbacks : public BLECharacteristicCallbacks {
         gradeFloat = gradeRaw / 100.0f;
         /*if (gradeFloat < 0) gradeFloat *= 2.0f;*/
 
-        double gradeClamp = gradeFloat;
-        if (gradeClamp < Ystep[0]) gradeClamp = Ystep[0];
-        if (gradeClamp > Ystep[Ycountstep-1]) gradeClamp = Ystep[Ycountstep-1];
-
-        tgtLogical = (int32_t)lround(
-          gradeToSteps((double)currentSpeedMph, (double)gradeClamp)
-        );
-        tgtLogical = constrain(tgtLogical, LOGICAL_MIN, LOGICAL_MAX);
         gMode = MODE_SIM;                      // <<< mode set here
 
         ftmsState = 11;
@@ -1754,7 +1746,19 @@ void loop() {
       tgtLogical = t;
     }
     else if (mode == MODE_SIM) {
-  
+    double gradeClamp = gradeFloat;
+
+    // clamp grade to table range
+    if (gradeClamp < Ystep[0]) gradeClamp = Ystep[0];
+    if (gradeClamp > Ystep[Ycountstep - 1]) gradeClamp = Ystep[Ycountstep - 1];
+
+    // clamp speed to table range (or allow your function to handle it)
+    double speedClamp = currentSpeedMph;
+    if (speedClamp < Xstep[0]) speedClamp = Xstep[0];
+    if (speedClamp > Xstep[Xcountstep - 1]) speedClamp = Xstep[Xcountstep - 1];
+
+    int32_t t = (int32_t)lround(gradeToSteps(speedClamp, gradeClamp));
+    tgtLogical = constrain(t, LOGICAL_MIN, LOGICAL_MAX);
 
     }
   // else SIM: gTgtLogical is updated in case 0x11 (or you can compute here from gradeFloat)

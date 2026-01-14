@@ -543,7 +543,7 @@ double powerFromSpeedPos(double x, double y) {
 //Random variables
 int currentEstPower = 0;
 
-// ===================== Power from Speed/Pos Calibration data (5x5) =====================
+// ===================== Steps from Speed/Power Calibration data (5x5) =====================
 
 double Xw [] = { 0, 5, 10, 15, 20, 25, 50 };
 double Yw [] = { 0, 100, 150, 200, 250, 300, 400, 600, 1000 };
@@ -564,7 +564,7 @@ double Zw[Xcountw][Ycountw] = {
 };
 
 
-// ==================== Power from Speed/Pos Bilinear Interpolation =========================
+// ==================== Steps from Speed/Power Bilinear Interpolation =========================
 double stepFromPowerSpeed(double xw, double yw) {
   int xIndexw, yIndexw;
 
@@ -753,7 +753,7 @@ static void requestRehome(const char* why) {
   Serial.printf("[SAFETY] Limit hit -> rehome requested (%s)\n", why);
 }
 
-
+/*
 // ===================== Grade -> target steps (simple linear mapping) =====================
 static int32_t gradeToSteps(float gradePercent) {
   const float MIN_GRADE = -2.0f;   // lowest resistance
@@ -774,7 +774,101 @@ static int32_t gradeToSteps(float gradePercent) {
     LOGICAL_MIN + t * (LOGICAL_MAX - LOGICAL_MIN)
   );
 }
+*/
 
+// ===================== Stepper from Speed/Grade Calibration data (5x5) =====================
+double Xstep [] = { 0, 5, 10, 15, 20, 25, 30, 50 };
+double Ystep [] = { -4, 0, 2, 4, 6, 8, 10 };
+
+const int Xcountstep = sizeof(Xstep) / sizeof(Xstep[0]); //X=mph
+const int Ycountstep = sizeof(Ystep) / sizeof(Ystep[0]); //Y=grade
+
+
+
+double Zstep[Xcountstep][Ycountstep] = {
+  {   0,  167,  333,  500,  667,  833, 1000 },
+  {   0,  167,  333,  500,  667,  833, 1000 },
+  {   0,  167,  333,  500,  667,  833, 1000 },
+  {   0,  167,  333,  500,  667,  833, 1000 },
+  {   0,  167,  333,  500,  667,  833, 1000 },
+  { 167,  333,  500,  677,  834, 1000, 1000 },
+  { 333,  500,  677,  834, 1000, 1000, 1000 },
+  { 500,  500,  677,  834, 1000, 1000, 1000 }
+};
+
+
+// ==================== Stepper from Speed/Grade Bilinear Interpolation =========================
+double gradeToSteps(double xstep, double ystep) {
+  int xIndexstep, yIndexstep;
+
+
+  if ((xstep < Xstep[0]) || (xstep > Xstep[Xcountstep - 1])) {
+    Serial.println(F("xstep not in range"));
+    return 0;  // arbitrary...
+  }
+
+
+  if ((ystep < Ystep[0]) || (ystep > Ystep[Ycountstep - 1])) {
+    Serial.println(F("ystep not in range"));
+    return 0;  // arbitrary...
+  }
+
+
+  for (int istep = Xcountstep - 2; istep >= 0; --istep)
+    if (xstep >= Xstep[istep]) {
+      xIndexstep = istep;
+      break;
+    }
+
+
+  for (int istep = Ycountstep - 2; istep >= 0; --istep)
+    if (ystep >= Ystep[istep]) {
+      yIndexstep = istep;
+      break;
+    }
+/*
+  Serial.print(F("X:"));
+  Serial.print(x);
+  Serial.print(F(" in ["));
+  Serial.print(X[xIndex]);
+  Serial.print(F(","));
+  Serial.print(X[xIndex + 1]);
+  Serial.print(F("] and Y:"));
+  Serial.print(y);
+  Serial.print(F(" in ["));
+  Serial.print(Y[yIndex]);
+  Serial.print(F(","));
+  Serial.print(Y[yIndex + 1]);
+  Serial.println(F("]"));
+*/
+  // https://en.wikipedia.org/wiki/Bilinear_interpolation
+  // Q11 = (x1, y1), Q12 = (x1, y2), Q21 = (x2, y1), and Q22 = (x2, y2)
+  double x1step, y1step, x2step, y2step;
+  double fQ11step, fQ12step, fQ21step, fQ22step;
+  double fxy1step, fxy2step, fxystep;
+
+
+  x1step = Xstep[xIndexstep];
+  x2step = Xstep[xIndexstep + 1];
+  y1step = Ystep[yIndexstep];
+  y2step = Ystep[yIndexstep + 1];
+
+
+  fQ11step = Zstep[xIndexstep][yIndexstep];
+  fQ12step = Zstep[xIndexstep][yIndexstep + 1];
+  fQ21step = Zstep[xIndexstep + 1][yIndexstep];
+  fQ22step = Zstep[xIndexstep + 1][yIndexstep + 1];
+
+
+  fxy1step = ((x2step - xstep) / (x2step - x1step)) * fQ11step + ((xstep - x1step) / (x2step - x1step)) * fQ21step;
+  fxy2step = ((x2step - xstep) / (x2step - x1step)) * fQ12step + ((xstep - x1step) / (x2step - x1step)) * fQ22step;
+
+
+  fxystep = ((y2step - ystep) / (y2step - y1step)) * fxy1step + ((ystep - y1step) / (y2step - y1step)) * fxy2step;
+
+
+  return fxystep;
+}
 
 // ===================== Execute stepper =====================
 static void stepperGoto(int32_t pos) {
@@ -1036,11 +1130,16 @@ class ControlPointCallbacks : public BLECharacteristicCallbacks {
         int16_t gradeRaw = (int16_t)((rx[4] << 8) | rx[3]);
 
         gradeFloat = gradeRaw / 100.0f;
-        if (gradeFloat < 0) gradeFloat *= 2.0f;
+        /*if (gradeFloat < 0) gradeFloat *= 2.0f;*/
 
+        double gradeClamp = gradeFloat;
+        if (gradeClamp < Ystep[0]) gradeClamp = Ystep[0];
+        if (gradeClamp > Ystep[Ycountstep-1]) gradeClamp = Ystep[Ycountstep-1];
 
-        tgtLogical = gradeToSteps(gradeFloat); // update immediately on SIM packet
-        gLastSimRxMs = millis();
+        tgtLogical = (int32_t)lround(
+          gradeToSteps((double)currentSpeedMph, (double)gradeClamp)
+        );
+        tgtLogical = constrain(tgtLogical, LOGICAL_MIN, LOGICAL_MAX);
         gMode = MODE_SIM;                      // <<< mode set here
 
         ftmsState = 11;

@@ -31,7 +31,7 @@ enum ControlMode : uint8_t {
 #include <esp_partition.h>
 #include <esp_system.h>
 
-static const char* FW_VERSION = "2026-01-10_04";  // change each build
+static const char* FW_VERSION = "2026-01-13_01";  // change each build
 
 // -------------------- SoftAP config --------------------
 static const char* AP_SSID = "InsideRideCal";

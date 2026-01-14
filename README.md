@@ -9,7 +9,7 @@ Reprogramming the original InsideRide Smart Rollers with Qubo Smart Unit to be u
 5. How to use the Smart Rollers
 6. High level code flow
 7. Calibration
-8. LED States
+8. [LED States](#led-states)
 9. Hardware
 
 ## Introduction
@@ -17,24 +17,14 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 
 This is my old project here: https://github.com/acedeuce802/DIY-Smart-Roller.  I had completed the code for ERG mode and hadn't yet written code for simulation mode, when a set of InsideRide E-motion Smart Rollers popped up for sale for a too-good-to-be-true price.  Shouldn't a production smart roller be much better than a DIY hack setup?  The hardware is great, they are on fore-aft linear bearings, are very smooth, and have a flywheel to better simulate road feel.  The software leaves a lot to be desired, these are an older version that uses an adapted wheel-on fixed trainer smart module, with a belt run to the rollers.  They use an older protocol that doesn't work on newer cycling programs and are very slow to react.  My biggest gripe is in the virtual game, Zwift, when feeling grade changes takes 4-5 seconds.  During a race, when competitors surge power at the base of a hill, I'm left in the dust.  This project is to replace the circuit board with one that adapts an ESP32 and stepper motor controller, can drop right in place of the old PCB, and significantly speeds up the rollers.
 
-# Features
+## Features
 - Communication at 20hz with cycling programs
 - Quick reaction of the stepper motor
 - Removed software power limit (use at own risk, original limit of 900w)
 - Code allows to calibrate power versus speed and stepper position, for an estimated power output (more accurate than the original 1x3 calibration)
 - Code allows to calibrate stepper position versus speed and grade, you can decide if you want to ramp up resistance hard during fast sprints
 
-# How to use the Web Server
-
-
-
-
-
-
-
-
-
-
+## How to use the Web Server
 
 
 
@@ -45,3 +35,13 @@ This is my old project here: https://github.com/acedeuce802/DIY-Smart-Roller.  I
 ## How to install code
 
 
+## LED States
+* OTA in progress: rapid blink (10 Hz)
+* OTA unlocked window: double-blink every ~2s
+* Fault / rehome requested / limit hit: SOS-like triple blink repeating
+* Homing: medium blink (2 Hz)
+* BLE connected: “heartbeat” (short on, long off)  
+##### Mode indication:
+* ERG: solid ON
+* SIM: slow blink (1 Hz)
+* IDLE: OFF

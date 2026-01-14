@@ -2,7 +2,7 @@
 Reprogramming the original InsideRide Smart Rollers with Qubo Smart Unit to be updated to FTMS protocol
 
 ## Table of Contents
-1. [Introduction](introduction)
+1. [Introduction](#introduction)
 2. Features
 3. How to use Web Server
 4. How to install code

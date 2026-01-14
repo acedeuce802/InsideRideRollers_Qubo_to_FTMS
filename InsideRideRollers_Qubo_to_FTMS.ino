@@ -18,6 +18,8 @@ enum ControlMode : uint8_t {
   MODE_ERG  = 2    // (speed, targetW) -> steps
 };
 
+enum LedPattern : uint8_t;  // forward declare the enum type
+
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
@@ -31,7 +33,9 @@ enum ControlMode : uint8_t {
 #include <esp_partition.h>
 #include <esp_system.h>
 
-static const char* FW_VERSION = "2026-01-13_02";  // change each build
+static const char* FW_VERSION = "2026-01-14_01";  // change each build
+
+volatile ControlMode gMode = MODE_IDLE;
 
 // -------------------- SoftAP config --------------------
 static const char* AP_SSID = "InsideRideCal";
@@ -95,11 +99,154 @@ static const int LIMIT_PIN   = D6; // INPUT_PULLUP, switch -> GND
 static const int HALL_PIN    = D7; // INPUT_PULLUP, interrupt
 static const int CAL_BTN_PIN = D8; // INPUT_PULLUP, momentary -> GND
 
+static const int LED_PIN = D9;
+
 
 // ===================== Millis =====================
 unsigned long whileMillis;
 unsigned long millisValue = 0;
 
+
+// ===================== LED =====================
+static inline bool otaIsUnlocked();  // defined later (keep static inline)
+
+// These are defined later in the same .ino, so forward-declare them with matching linkage:
+extern volatile bool gIsHoming;         // <-- only keep extern if the definitions are NOT static
+extern volatile bool gRehomeRequested;  // <-- same
+extern bool deviceConnected;            // <-- same
+
+static const bool LED_ACTIVE_HIGH = true;  // set false if LED is wired to 3.3V and sinks to GND
+
+static inline void ledWrite(bool on) {
+  digitalWrite(LED_PIN, (on ^ !LED_ACTIVE_HIGH) ? HIGH : LOW);
+}
+
+enum LedPattern : uint8_t {
+  LED_OFF = 0,
+  LED_SOLID,
+  LED_BLINK_SLOW,
+  LED_BLINK_MED,
+  LED_BLINK_FAST,
+  LED_HEARTBEAT,
+  LED_DOUBLE_BLIP,
+  LED_TRIPLE_BLIP
+};
+
+static LedPattern gLedPattern = LED_OFF;
+
+// internal timing state
+static bool     gLedOn = false;
+static uint32_t gLedNextMs = 0;
+static uint8_t  gLedPhase = 0;
+
+static void ledSetPattern(LedPattern p) {
+  if (p == gLedPattern) return;
+  gLedPattern = p;
+  gLedPhase = 0;
+  gLedOn = false;
+  gLedNextMs = 0;
+  ledWrite(false);
+}
+
+static void ledUpdate() {
+  const uint32_t now = millis();
+  if (gLedNextMs != 0 && (int32_t)(now - gLedNextMs) < 0) return;
+
+  switch (gLedPattern) {
+    case LED_OFF:
+      ledWrite(false);
+      gLedNextMs = now + 500;
+      break;
+
+    case LED_SOLID:
+      ledWrite(true);
+      gLedNextMs = now + 500;
+      break;
+
+    case LED_BLINK_SLOW: { // 1 Hz (500/500)
+      gLedOn = !gLedOn;
+      ledWrite(gLedOn);
+      gLedNextMs = now + 500;
+    } break;
+
+    case LED_BLINK_MED: { // 2 Hz (250/250)
+      gLedOn = !gLedOn;
+      ledWrite(gLedOn);
+      gLedNextMs = now + 250;
+    } break;
+
+    case LED_BLINK_FAST: { // 10 Hz (50/50) - still visible
+      gLedOn = !gLedOn;
+      ledWrite(gLedOn);
+      gLedNextMs = now + 50;
+    } break;
+
+    case LED_HEARTBEAT: {
+      // short ON (80ms) then long OFF (920ms)
+      if (gLedPhase == 0) { ledWrite(true);  gLedNextMs = now + 80;  gLedPhase = 1; }
+      else                { ledWrite(false); gLedNextMs = now + 920; gLedPhase = 0; }
+    } break;
+
+    case LED_DOUBLE_BLIP: {
+      // ON 80, OFF 120, ON 80, OFF 1700
+      switch (gLedPhase) {
+        case 0: ledWrite(true);  gLedNextMs = now + 80;   gLedPhase = 1; break;
+        case 1: ledWrite(false); gLedNextMs = now + 120;  gLedPhase = 2; break;
+        case 2: ledWrite(true);  gLedNextMs = now + 80;   gLedPhase = 3; break;
+        default:
+          ledWrite(false); gLedNextMs = now + 1700; gLedPhase = 0; break;
+      }
+    } break;
+
+    case LED_TRIPLE_BLIP: {
+      // ON 80, OFF 120, ON 80, OFF 120, ON 80, OFF 1500
+      switch (gLedPhase) {
+        case 0: ledWrite(true);  gLedNextMs = now + 80;   gLedPhase = 1; break;
+        case 1: ledWrite(false); gLedNextMs = now + 120;  gLedPhase = 2; break;
+        case 2: ledWrite(true);  gLedNextMs = now + 80;   gLedPhase = 3; break;
+        case 3: ledWrite(false); gLedNextMs = now + 120;  gLedPhase = 4; break;
+        case 4: ledWrite(true);  gLedNextMs = now + 80;   gLedPhase = 5; break;
+        default:
+          ledWrite(false); gLedNextMs = now + 1500; gLedPhase = 0; break;
+      }
+    } break;
+  }
+}
+
+static void ledSelectPattern() {
+  // Highest priority first
+  if (gOtaInProgress) {
+    ledSetPattern(LED_BLINK_FAST);
+    return;
+  }
+
+  if (otaIsUnlocked()) {
+    ledSetPattern(LED_DOUBLE_BLIP);
+    return;
+  }
+
+  if (gRehomeRequested) {             // or any other "fault" latch you want
+    ledSetPattern(LED_TRIPLE_BLIP);
+    return;
+  }
+
+  if (gIsHoming) {
+    ledSetPattern(LED_BLINK_MED);
+    return;
+  }
+
+  if (deviceConnected) {
+    ledSetPattern(LED_HEARTBEAT);
+    return;
+  }
+
+  // Normal mode display
+  switch (gMode) {
+    case MODE_ERG:  ledSetPattern(LED_SOLID);     break;
+    case MODE_SIM:  ledSetPattern(LED_BLINK_SLOW);break;
+    default:        ledSetPattern(LED_OFF);       break;
+  }
+}
 
 // ===================== Simulation bounds and variables =====================
 const int upperInclineClamp = 10;
@@ -669,8 +816,8 @@ static void stepperSetSpeed(float sps) {
 
 
 // ===================== Homing =====================
-static volatile bool gIsHoming = false;
-static volatile bool gRehomeRequested = false;
+volatile bool gIsHoming = false;
+volatile bool gRehomeRequested = false;
 
 static uint32_t gLastLimitTripMs = 0;
 static const uint32_t REHOME_COOLDOWN_MS = 2000;   // don't rehome repeatedly if switch chatters
@@ -974,7 +1121,7 @@ static uint32_t nextControlAllowedMs = 0;   // replaces whileMillis/while spin
 static uint32_t lastFtmsNotifyMs     = 0;
 static const uint32_t FTMS_NOTIFY_PERIOD_MS = 100; // 10 Hz
 
-static volatile ControlMode gMode = MODE_IDLE;
+
 
 // already in your code (keep these, but ensure they are globals, not shadowed)
 static volatile int16_t ergTargetW  = 0;
@@ -1549,7 +1696,10 @@ void setup() {
   pinMode(LIMIT_PIN, INPUT_PULLUP);
   pinMode(HALL_PIN, INPUT_PULLUP);
   pinMode(CAL_BTN_PIN, INPUT_PULLUP);
+  pinMode(LED_PIN, OUTPUT);
 
+  ledWrite(false);
+  ledSetPattern(LED_BLINK_MED); // optional “boot” indication
 
   Serial.println("Starting initialisation routine");
 
@@ -1640,11 +1790,12 @@ void setup() {
 
 void loop() {
   server.handleClient();
-
   // If OTA is running, do not do BLE notify / stepper / heavy Serial prints.
   // Keep loop tight so WiFi can receive upload data reliably.
   if (gOtaInProgress) {
     // Only service web + button (optional) while uploading.
+    ledSelectPattern();
+    ledUpdate();
     delay(1);
     return;
   }
@@ -1761,7 +1912,7 @@ void loop() {
     tgtLogical = constrain(t, LOGICAL_MIN, LOGICAL_MAX);
 
     }
-  // else SIM: gTgtLogical is updated in case 0x11 (or you can compute here from gradeFloat)
+
   }
   
   int32_t target;
@@ -1812,6 +1963,7 @@ void loop() {
   if (calPressedEdge()) {
     otaUnlockNow();
   }
-
+  ledSelectPattern();
+  ledUpdate();
 }
 

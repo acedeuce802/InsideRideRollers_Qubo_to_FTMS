@@ -3,9 +3,9 @@ Reprogramming the original InsideRide Smart Rollers with Qubo Smart Unit to be u
 
 ## Table of Contents
 1. [Introduction](#introduction)
-2. Features
+2. [Features](#features)
 3. How to use Web Server
-4. How to install code
+4. [How to install code](#how-to-install-code)
 5. How to use the Smart Rollers
 6. High level code flow
 7. Calibration
@@ -21,3 +21,88 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 - Removed software power limit (use at own risk, original limit of 900w)
 - Code allows to calibrate power versus speed and stepper position, for an estimated power output (more accurate than the original 1x3 calibration)
 - Code allows to calibrate stepper position versus speed and grade, you can decide if you want to ramp up resistance hard during fast sprints
+
+# How to use the Web Server
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## How to install code
+
+

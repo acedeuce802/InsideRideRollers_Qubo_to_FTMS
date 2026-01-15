@@ -29,8 +29,8 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 
 ## How to use the Smart Rollers
 * These are intended to work very similarly to any smart trainer, so only unique instructions/tips/tricks are included
-* When connecting to cycling software, connect as a Power Meter first, then as a Controllable Trainer (sometimes both are selected automatically)
-     - I'm working to fix, but currently if a physicaly power meter is connected first, this device won't be able to be connected as a Controllable Trainer
+* When connecting to cycling software, connect as a Power Meter first, then as a Controllable Trainer (sometimes both are selected automatically), then remove the device as a Power Meter, and select the power meter on your bike
+     - I'm working to fix, but currently if a physical power meter is connected first, this device won't be able to be connected as a Controllable Trainer
 * In SIM mode:
      - This works just as any smart trainer
      - I enjoy riding Zwift at 50% Trainer Difficulty, meaning a 10% grade in Zwift actually translates to a 5% grade getting sent to the device

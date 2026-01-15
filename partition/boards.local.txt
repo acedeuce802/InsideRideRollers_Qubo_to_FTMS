@@ -1,0 +1,6 @@
+XIAO_ESP32C6.menu.PartitionScheme.ota16=OTA (1.6MB APP/1.6MB OTA/0.85MB SPIFFS)
+XIAO_ESP32C6.menu.PartitionScheme.ota16.build.partitions=xiao_c6_ota_16m
+XIAO_ESP32C6.menu.PartitionScheme.ota16.upload.maximum_size=1638400
+XIAO_ESP32C6.menu.PartitionScheme.zztest=ZZ TEST (if you see this, boards.local works)
+XIAO_ESP32C6.menu.PartitionScheme.zztest.build.partitions=default
+XIAO_ESP32C6.menu.PartitionScheme.zztest.upload.maximum_size=1310720

@@ -20,6 +20,9 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 
 ![40143475285_08258a0821_c](https://github.com/user-attachments/assets/8bd6478c-a1c2-408c-916d-897ce8922b6e)
 
+<img width="956" height="1270" alt="image" src="https://github.com/user-attachments/assets/2dd5cecf-59f9-4ea9-abed-5e18dc795f92" />
+
+
 ## Features
 - Communication at 20hz with cycling programs
 - Quick reaction of the stepper motor

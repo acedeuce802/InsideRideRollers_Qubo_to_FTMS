@@ -70,7 +70,7 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 
 ## How to install code
 ### Via Web Server
-1. [Download the latest .bin file from here](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/tree/TestLimits/build/esp32.esp32.XIAO_ESP32C6)
+1. [Download the latest .bin file from here](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/tree/main/build/esp32.esp32.XIAO_ESP32C6)
 2. Navigate to the Web Server and click "Firmware Update"
      - In order to update firmware, the CAL button needs pressed, and BLE must not be connected
      - CAL button is the button nearest the 3-pin connector
@@ -86,11 +86,11 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 ### Via Arduino IDE
 1. Download Arduino IDE software
 2. Navigate to "Boards Manager" and download "ESP32"
-3. [Download "boards.local.txt" and "xiao_c6_ota_16m.csv" from here](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/tree/TestLimits/partition)
+3. [Download "boards.local.txt" and "xiao_c6_ota_16m.csv" from here](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/tree/main/partition)
 4. In Windows Explorer, navigate to "C:\Users\*user*\AppData\Local\Arduino15\packages\esp32\hardware\esp32\3.3.3" (you may have to allow viewing hidden files)
 5. Place "boards.local.txt" into this ESP folder, to confirm you are in the right spot, you should also see "boards.txt"
 6. Place "xiao_c6_ota_16m.csv" into "C:\Users\*user*\AppData\Local\Arduino15\packages\esp32\hardware\esp32\3.3.3\tools\partitions
-7. [Download and open "InsideRideRollers_Qubo_to_FTMS.ino" from here, and open with Arduino IDE](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/tree/TestLimits)
+7. [Download and open "InsideRideRollers_Qubo_to_FTMS.ino" from here, and open with Arduino IDE](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/tree/main)
 8. Plug in the USB-C cable to the ESP32 (PCB V2 has tight clearance from the cable to power input and capacitor, be careful)
 9. Select the COM port at the top of the Arduino screen, click "Select Other Board and Port" and select "XIAO_ESP32C6"
 10. Go to Tools->Partition Scheme and select "OTA (1.6MB APP/1.6MB OTA/0.85MB SPIFFS)"

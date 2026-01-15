@@ -41,6 +41,9 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
      - Depending on current gear, wheel speed, and power target, smart rollers may either be at minimum resistance and you are making more power than the target, or vice versa     -
      - See graph below to get an idea of the tuning band at each speed, and based on your FTP and workout selected (ultimately your min/max power), you can get an idea of what gear(s) you should be in for the workout
 
+<img width="750" height="464" alt="image" src="https://github.com/user-attachments/assets/b7175e7f-262d-413d-aa35-3675efdd25b5" />
+
+
 ## How to use the Web Server
 1. Whenever the power is on, the Wi-Fi SSID "InsideRideCal" will be able to be connected to
 2. Wi-Fi Password is "insideride"
@@ -109,6 +112,7 @@ If any issues arise during OTA updates, or the Web Server isn't working to show 
 ## High level code flow
 
 ## Calibration
+* Working to make spreadsheet cleaner
 
 ## LED States
 * OTA in progress: rapid blink (10 Hz)

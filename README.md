@@ -5,10 +5,11 @@ Reprogramming the original InsideRide Smart Rollers with Qubo Smart Unit to be u
 1. [Introduction](#introduction)
 2. [Features](#features)
 3. [How to use the Smart Rollers](#how-to-use-the-smart-rollers)
-4. [How to use Web Server](#how-to-use-the-web-server)
-5. [How to install code](#how-to-install-code)
-6. [How to modify code](#how-to-modify-code)
-7. [How to view Serial Data](#how-to-view-serial-data)
+4. [How Smart Rollers work](#how-smart-rollers-work)
+5. [How to use Web Server](#how-to-use-the-web-server)
+6. [How to install code](#how-to-install-code)
+7. [How to modify code](#how-to-modify-code)
+8. [How to view Serial Data](#how-to-view-serial-data)
 9. [High level code flow](#high-level-code-flow)
 10. [Calibration](#calibration)
 11. [LED States](#led-states)
@@ -19,6 +20,9 @@ Reprogramming the original InsideRide Smart Rollers with Qubo Smart Unit to be u
 Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in the front.  They allow cyclists to ride indoors while balancing, to practice and train in a more realistic environment.  A Smart trainer is a device that connects to a training software (Zwift, Trainerroad, MyWhoosh, etc) which can control it's resistance to either simulate how a grade would feel, or to closed loop control power.  Most smart trainers are fixed, either by holding the rear axle with the rear tire on a roller, or the rear wheel is removed and the frame is clamped onto the trainer, but a small percentage of the trainers out there are smart rollers.  The older version of the InsideRide E-Motion Smart Rollers use an adapted smart unit from an Elite Qubo trainer (see picture below).  They use an older protocol that doesn't work on newer cycling programs and are very slow to react.  My biggest gripe is in the virtual game, Zwift, when feeling grade changes takes 4-5 seconds.  During a race, when competitors surge power at the base of a hill, I'm left in the dust.  This project is to replace the circuit board with one that adapts an ESP32 and stepper motor controller, can drop right in place of the old PCB, and significantly speeds up the rollers.
 
 ![40143475285_08258a0821_c](https://github.com/user-attachments/assets/8bd6478c-a1c2-408c-916d-897ce8922b6e)
+
+<img width="956" height="1270" alt="image" src="https://github.com/user-attachments/assets/2dd5cecf-59f9-4ea9-abed-5e18dc795f92" />
+
 
 ## Features
 - Communication at 20hz with cycling programs
@@ -54,6 +58,23 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 
 <img width="750" height="464" alt="image" src="https://github.com/user-attachments/assets/b7175e7f-262d-413d-aa35-3675efdd25b5" />
 
+## How Smart Rollers Work
+* Most cycling trainers work off the Eddy Current theory, that magnets placed near moving ferrous material will create resistance
+* The Qubo smart unit uses a flywheel connected to the rear rollers by a belt, 2 magnets on a plastic sled, and a stepper motor to control the position
+* The closer the magnets are to being fully placed over the flywheel, the more resistance is generated, causing more power required at the pedals
+* As flywheel speed increases, required power also increases
+* In ERG mode for example, to keep a constant power, as the cyclist shifts up or increase cadence, magnetic resistance will need to be lowered to compensate, and vice versa
+* In SIM mode, there is some calibration table that sets magnet position based on grade (most trainers ignore wind, rolling resistance, etc, those only affect speed in the game)
+* This whole project is simply just: take ERG or SIM inputs, and tell the stepper motor what position to go to
+
+##### Magnet moving in relation to flywheel
+![magnet](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/blob/TestLimits/gifs/Magnet_v2.gif)
+
+##### Fast jog move of stepper motor
+![jogging](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/blob/TestLimits/gifs/Jogging.gif)
+
+#### Homing using the limit switch
+![Homing](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/blob/TestLimits/gifs/Homing.gif)
 
 ## How to use the Web Server
 1. Whenever the power is on, the Wi-Fi SSID "InsideRideCal" will be able to be connected to

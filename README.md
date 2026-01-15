@@ -158,7 +158,7 @@ If any issues arise during OTA updates, or the Web Server isn't working to show 
 #### Spreadsheet will extrapolate into a larger table to supply to the function powerFromSpeedPos() with x-axis stepper position, y-axis speed, and z-output power, I did no riding at max stepper position because the resistance is so great, and I obviously didn't reach 50mph to calibrate, but extrapolated that far so I didn't have to extrapolate in Arduino code
 <img width="616" height="177" alt="image" src="https://github.com/user-attachments/assets/81bc5640-7105-483f-8466-2abc16836f68" />
 
-#### Spreadsheet will back populate a new table to supply to the function stepFromPowerSpeed() with x-axis target power, y-axis speed, and z-putput stepper position.  Anything below 0 was clamped to 0, and anything above 1000 was clamped to 1000
+#### Spreadsheet will back calculate a new table to supply to the function stepFromPowerSpeed() with x-axis target power, y-axis speed, and z-putput stepper position.  Anything below 0 was clamped to 0, and anything above 1000 was clamped to 1000
 <img width="1015" height="175" alt="image" src="https://github.com/user-attachments/assets/f8f9d1f2-57ec-453a-8201-e04f75d1d41c" />
 
 #### This table was made from testing out different Trainer Difficulties, finding what grade vs. stepper position I liked, and then ramping up with speed so that you don't have to spin so fast to get high power on flats.  This supplies to the function gradeToSteps() with x-axis grade, y-axis speed, and z-output stepper position

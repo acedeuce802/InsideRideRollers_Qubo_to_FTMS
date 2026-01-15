@@ -41,12 +41,12 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
      - In SIM mode, the only function is using grade and roller speed to calculate resistance level
      - The only function of [calibration](#calibration) in SIM mode is for estimated power
 * In ERG mode:
-     - Smart rollers have a narrower power band than a fixed trainer (like a Wahoo Kickr)
-     - Fixed trainers can often complete all workouts without needing to shift gears
      - Calibration is important here, there is a [calibration](#calibration) table that takes target power and current roller speed, and outputs stepper motor position (resistance)
      - Apps like Zwift and Trainerroad (any app with a Power Match function), will compensate if this calibration isn't perfect
      - If for example, Zwift commands 300w, you are spinning at 15mph, the stepper motor goes to position=300, and your power meter reads 330w, Zwift will slowly ramp down it's target power until 300w is achieved
-     - The close your calibration is, the quicker ERG mode will react to new power levels
+     - The closer your calibration is, the quicker ERG mode will react to new power levels
+     - Smart rollers have a narrower power band than a fixed trainer (like a Wahoo Kickr)
+     - Fixed trainers can often complete all workouts without needing to shift gears
      - Depending on current gear, wheel speed, and power target, smart rollers may either be at minimum resistance and you are making more power than the target, or vice versa     -
      - See graph below to get an idea of the tuning band at each speed, and based on your FTP and workout selected (ultimately your min/max power), you can get an idea of what gear(s) you should be in for the workout
      - Example: FTP of 300w, doing a VO2 workout with intervals between 50% and 110% FTP (150w and 330w), the workout could be done at 10mph, but any variation of cadence could push you under or over the tuning band

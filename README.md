@@ -67,7 +67,14 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 * In SIM mode, there is some calibration table that sets magnet position based on grade (most trainers ignore wind, rolling resistance, etc, those only affect speed in the game)
 * This whole project is simply just: take ERG or SIM inputs, and tell the stepper motor what position to go to
 
+##### Magnet moving in relation to flywheel
+![magnet](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/blob/TestLimits/gifs/Magnet.gif)
 
+##### Fast jog move of stepper motor
+![jogging](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/blob/TestLimits/gifs/Jogging.gif)
+
+#### Homing using the limit switch
+![Homing](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/blob/TestLimits/gifs/Homing.gif)
 
 ## How to use the Web Server
 1. Whenever the power is on, the Wi-Fi SSID "InsideRideCal" will be able to be connected to

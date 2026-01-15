@@ -33,7 +33,7 @@ enum LedPattern : uint8_t;  // forward declare the enum type
 #include <esp_partition.h>
 #include <esp_system.h>
 
-static const char* FW_VERSION = "2026-01-14_01";  // change each build
+static const char* FW_VERSION = "2026-01-14_02";  // change each build
 
 volatile ControlMode gMode = MODE_IDLE;
 
@@ -236,15 +236,18 @@ static void ledSelectPattern() {
   }
 
   if (deviceConnected) {
-    ledSetPattern(LED_HEARTBEAT);
-    return;
+    switch (gMode) {
+      case MODE_ERG:  ledSetPattern(LED_SOLID);      return;
+      case MODE_SIM:  ledSetPattern(LED_BLINK_SLOW); return;
+      default:        ledSetPattern(LED_HEARTBEAT);  return;
+    }
   }
 
-  // Normal mode display
+  // Not connected: show something simpler
   switch (gMode) {
-    case MODE_ERG:  ledSetPattern(LED_SOLID);     break;
-    case MODE_SIM:  ledSetPattern(LED_BLINK_SLOW);break;
-    default:        ledSetPattern(LED_OFF);       break;
+    case MODE_ERG:  ledSetPattern(LED_SOLID);      break;   // optional
+    case MODE_SIM:  ledSetPattern(LED_BLINK_SLOW); break;   // optional
+    default:        ledSetPattern(LED_OFF);        break;
   }
 }
 

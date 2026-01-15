@@ -33,7 +33,7 @@ enum LedPattern : uint8_t;  // forward declare the enum type
 #include <esp_partition.h>
 #include <esp_system.h>
 
-static const char* FW_VERSION = "2026-01-14_02";  // change each build
+static const char* FW_VERSION = "2026-01-14_03";  // change each build
 
 volatile ControlMode gMode = MODE_IDLE;
 
@@ -1915,7 +1915,23 @@ void loop() {
     tgtLogical = constrain(t, LOGICAL_MIN, LOGICAL_MAX);
 
     }
+    else {
+      double speedDumbCurve = currentSpeedMph;
 
+      // Optional clamp of input domain for curve-fit validity
+      if (speedDumbCurve < Xstep[0]) speedDumbCurve = Xstep[0];
+      if (speedDumbCurve > Xstep[Xcountstep - 1]) speedDumbCurve = Xstep[Xcountstep - 1];
+
+      // y = -8.95 + 20.3x - 0.597x^2 + 0.0101x^3
+      double stepDumbCurve =
+          -8.95
+        + 20.3  * speedDumbCurve
+        - 0.597 * speedDumbCurve * speedDumbCurve
+        + 0.0101 * speedDumbCurve * speedDumbCurve * speedDumbCurve;
+
+      int32_t stepDumbCurveRound = (int32_t)lround(stepDumbCurve);
+      tgtLogical = constrain(stepDumbCurveRound, LOGICAL_MIN, LOGICAL_MAX);
+    }
   }
   
   int32_t target;

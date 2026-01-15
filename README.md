@@ -68,7 +68,7 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 * This whole project is simply just: take ERG or SIM inputs, and tell the stepper motor what position to go to
 
 ##### Magnet moving in relation to flywheel
-![magnet](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/blob/TestLimits/gifs/Magnet.gif)
+
 
 ##### Fast jog move of stepper motor
 ![jogging](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/blob/TestLimits/gifs/Jogging.gif)

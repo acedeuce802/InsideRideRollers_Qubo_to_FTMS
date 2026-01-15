@@ -5,10 +5,11 @@ Reprogramming the original InsideRide Smart Rollers with Qubo Smart Unit to be u
 1. [Introduction](#introduction)
 2. [Features](#features)
 3. [How to use the Smart Rollers](#how-to-use-the-smart-rollers)
-4. [How to use Web Server](#how-to-use-the-web-server)
-5. [How to install code](#how-to-install-code)
-6. [How to modify code](#how-to-modify-code)
-7. [How to view Serial Data](#how-to-view-serial-data)
+4. [How Smart Rollers work](#how-smart-rollers-work)
+5. [How to use Web Server](#how-to-use-the-web-server)
+6. [How to install code](#how-to-install-code)
+7. [How to modify code](#how-to-modify-code)
+8. [How to view Serial Data](#how-to-view-serial-data)
 9. [High level code flow](#high-level-code-flow)
 10. [Calibration](#calibration)
 11. [LED States](#led-states)
@@ -56,6 +57,16 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
      - This may be better done at 8mph for the rest intervals, and then do 1 or 2 upshifts to 12-15mph for the VO2 intervals, which helps get you in the middle of the tuning band
 
 <img width="750" height="464" alt="image" src="https://github.com/user-attachments/assets/b7175e7f-262d-413d-aa35-3675efdd25b5" />
+
+## How Smart Rollers Work
+* Most cycling trainers work off the Eddy Current theory, that magnets placed near moving ferrous material will create resistance
+* The Qubo smart unit uses a flywheel connected to the rear rollers by a belt, 2 magnets on a plastic sled, and a stepper motor to control the position
+* The closer the magnets are to being fully placed over the flywheel, the more resistance is generated, causing more power required at the pedals
+* As flywheel speed increases, required power also increases
+* In ERG mode for example, to keep a constant power, as the cyclist shifts up or increase cadence, magnetic resistance will need to be lowered to compensate, and vice versa
+* In SIM mode, there is some calibration table that sets magnet position based on grade (most trainers ignore wind, rolling resistance, etc, those only affect speed in the game)
+* This whole project is simply just: take ERG or SIM inputs, and tell the stepper motor what position to go to
+
 
 
 ## How to use the Web Server

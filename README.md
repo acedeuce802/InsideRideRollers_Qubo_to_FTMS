@@ -24,8 +24,7 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 - Communication at 20hz with cycling programs
 - Quick reaction of the stepper motor
 - Removed software power limit (use at own risk, original limit of 900w)
-- Code allows to calibrate power versus speed and stepper position, for an estimated power output (more accurate than the original 1x3 calibration)
-- Code allows to calibrate stepper position versus speed and grade, you can decide if you want to ramp up resistance hard during fast sprints
+- Code allows to calibrate stepper position versus speed and grade, you can decide if you want to ramp up resistance hard during fast sprints, have it mimic outside power vs. speed vs. grade, etc
 - Calibration table with more resolution than the Qubo unit (Qubo calibrates power to 3x1 speed x resistance table, this calibrates to 7x5 speed x resistance)
 - 9-30V input (only tested with 12V supply, same as Qubo module comes with)
 

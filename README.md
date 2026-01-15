@@ -150,7 +150,20 @@ If any issues arise during OTA updates, or the Web Server isn't working to show 
 * Code checks if Web Server "Go-To" function is active, in order to ignore ERG/SIM commands
 
 ## Calibration
-* Working to make spreadsheet cleaner
+* Working to make spreadsheet cleaner, will then upload a spreadsheet to turn test data into calibration tables, and make the descriptions more english
+
+#### Use the speed and stepper position targets, along with the Web Server readout and some way to read power (Zwift, Garmin, etc), and fill in the calibration table (Note: my initial spreadsheet will assume you can exert enough power to hit all these targets, in the future I will refine the spreadsheet to make the calibration table based on whatever data you give it)
+<img width="515" height="133" alt="image" src="https://github.com/user-attachments/assets/42d8e861-e392-4805-9346-c76a7ff4a14d" />
+
+#### Spreadsheet will extrapolate into a larger table to supply to the function powerFromSpeedPos() with x-axis stepper position, y-axis speed, and z-output power, I did no riding at max stepper position because the resistance is so great, and I obviously didn't reach 50mph to calibrate, but extrapolated that far so I didn't have to extrapolate in Arduino code
+<img width="616" height="177" alt="image" src="https://github.com/user-attachments/assets/81bc5640-7105-483f-8466-2abc16836f68" />
+
+#### Spreadsheet will back populate a new table to supply to the function stepFromPowerSpeed() with x-axis target power, y-axis speed, and z-putput stepper position.  Anything below 0 was clamped to 0, and anything above 1000 was clamped to 1000
+<img width="1015" height="175" alt="image" src="https://github.com/user-attachments/assets/f8f9d1f2-57ec-453a-8201-e04f75d1d41c" />
+
+#### This table was made from testing out different Trainer Difficulties, finding what grade vs. stepper position I liked, and then ramping up with speed so that you don't have to spin so fast to get high power on flats.  This supplies to the function gradeToSteps() with x-axis grade, y-axis speed, and z-output stepper position
+<img width="814" height="197" alt="image" src="https://github.com/user-attachments/assets/88826368-dddb-47ad-84c3-26f48c430932" />
+
 
 ## LED States
 * OTA in progress: rapid blink (10 Hz)

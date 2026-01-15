@@ -26,20 +26,32 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 - Removed software power limit (use at own risk, original limit of 900w)
 - Code allows to calibrate power versus speed and stepper position, for an estimated power output (more accurate than the original 1x3 calibration)
 - Code allows to calibrate stepper position versus speed and grade, you can decide if you want to ramp up resistance hard during fast sprints
+- Calibration table with more resolution than the Qubo unit (Qubo calibrates power to 3x1 speed x resistance table, this calibrates to 7x5 speed x resistance)
+- 9-30V input (only tested with 12V supply, same as Qubo module comes with)
 
 ## How to use the Smart Rollers
 * These are intended to work very similarly to any smart trainer, so only unique instructions/tips/tricks are included
 * When connecting to cycling software, connect as a Power Meter first, then as a Controllable Trainer (sometimes both are selected automatically), then remove the device as a Power Meter, and select the power meter on your bike
      - I'm working to fix, but currently if a physical power meter is connected first, this device won't be able to be connected as a Controllable Trainer
+* These will output an estimated power to the cycling software, be aware that estimating power on rollers is difficult, any variation in system weight, tire pressure, tire temperature, etc, will skew the results
+* See the [Calibration section](#calibration) to get the calibration as close as possible, but it's best not to rely on this as it will only be close, not accurate (true for any smart roller)
 * In SIM mode:
      - This works just as any smart trainer
      - I enjoy riding Zwift at 50% Trainer Difficulty, meaning a 10% grade in Zwift actually translates to a 5% grade getting sent to the device
      - Note: This device was calibrated by feel to what feels right, 50% Trainer Difficulty doesn't necessarily mean it'll feel half as easy as it does outside
+     - In SIM mode, the only function is using grade and roller speed to calculate resistance level
+     - The only function of [calibration](#calibration) in SIM mode is for estimated power
 * In ERG mode:
      - Smart rollers have a narrower power band than a fixed trainer (like a Wahoo Kickr)
      - Fixed trainers can often complete all workouts without needing to shift gears
+     - Calibration is important here, there is a [calibration](#calibration) table that takes target power and current roller speed, and outputs stepper motor position (resistance)
+     - Apps like Zwift and Trainerroad (any app with a Power Match function), will compensate if this calibration isn't perfect
+     - If for example, Zwift commands 300w, you are spinning at 15mph, the stepper motor goes to position=300, and your power meter reads 330w, Zwift will slowly ramp down it's target power until 300w is achieved
+     - The close your calibration is, the quicker ERG mode will react to new power levels
      - Depending on current gear, wheel speed, and power target, smart rollers may either be at minimum resistance and you are making more power than the target, or vice versa     -
      - See graph below to get an idea of the tuning band at each speed, and based on your FTP and workout selected (ultimately your min/max power), you can get an idea of what gear(s) you should be in for the workout
+     - Example: FTP of 300w, doing a VO2 workout with intervals between 50% and 110% FTP (150w and 330w), the workout could be done at 10mph, but any variation of cadence could push you under or over the tuning band
+     - This may be better done at 8mph for the rest intervals, and then do 1 or 2 upshifts to 12-15mph for the VO2 intervals, which helps get you in the middle of the tuning band
 
 <img width="750" height="464" alt="image" src="https://github.com/user-attachments/assets/b7175e7f-262d-413d-aa35-3675efdd25b5" />
 
@@ -110,6 +122,33 @@ If any issues arise during OTA updates, or the Web Server isn't working to show 
 
 
 ## High level code flow
+#### Setup (runs once when power turned on)
+1. Controller pins, speed sensor, etc are all initialized
+2. Controller homes the stepper motor, by driving it toward the limit switch, until the switch is presed
+3. The stepper motor backs off slightly, slows down, and represses the switch to get a more accurate zero
+4. BLE is exposed and allowed to be connected to by cycling apps
+5. Web Server is called and Wi-Fi enabled
+
+#### Loop (constantly running)
+*Note: This loop runs at thousands of times per second, so the order doesn't really matter.  If you update target stepper position first and then call the stepper motor to move, compared to calling the stepper motor first and then update the target after, the response time difference will be imperceivable, because either way the stepper position target and the call to move are happening within a millisecond of each other  
+
+1. BLE messages relating to SIM and ERG mode are only read when Zwift sends them, any functional code should be done outside of the BLE code
+     - Example, if there is code within the SIM mode code to update the stepper position based on grade and roller speed, and the grade is not changing in the cycling software, there will not be a new message, and therefore this stepper position function will not be called (see code block "0x11" to see how minimal the SIM mode message code is)
+     - What happens with this data (grade, target power, etc) happens every loop, but updating the cycling software variables (grade, target power) only occurs when the software sends updated messages
+3. Speed sensor is measured (can measure up to tens/hundreds of thousands of RPM)
+4. Speed is run through a filter
+5. If ERG mode: target power is updated when an "0x05" BLE packet comes in, then target power and roller speed will compute the stepper position
+6. If SIM mode: grade is updated when an "0x11" BLE packet comes in, then grade and roller speed will compute the stepper position
+7. If neither: a progressive speed versus stepper position curve is used, in case BLE drops while riding, you can at least hit all your desired powers based on wheel speed
+8. Stepper motor move command initiated
+9. Every 10hz, estimated power and cadence are sent back to the cycling software (cadence is only 0 or 90, in order to make auto pause work)
+
+##### Other functions that run in the background (less critical to main code flow)
+* Constantly checking if OTA is active, to shut down other features, such that the controller isn't overloaded
+* CAL button is constantly monitored
+* The limit switch is always being monitored, if the motor misses steps and the controller no longer knows true position, the stepper will rehome if the limit switch is pressed
+* Every second, a Serial message is printed with diagnostics (see function printDiag to add/remove messages)
+* Code checks if Web Server "Go-To" function is active, in order to ignore ERG/SIM commands
 
 ## Calibration
 * Working to make spreadsheet cleaner
@@ -126,6 +165,27 @@ If any issues arise during OTA updates, or the Web Server isn't working to show 
 * IDLE: OFF
 
 ## Hardware
+See PCB schematic and design below
+<img width="781" height="541" alt="image" src="https://github.com/user-attachments/assets/6f08b609-51e6-4172-a5f8-a1dbfc3bb7c9" />
+<img width="1086" height="388" alt="Screenshot 2026-01-15 153518" src="https://github.com/user-attachments/assets/46805f0a-811e-409a-9c82-0e54e627dd44" />
+
+#### Hardware List
+* PCB
+* Xiao ESP32-C6
+* Pololu DRV8825 Stepper Motor Driver
+* Mini360 Buck Converter (5-30V -> 5V)
+* 1x 100uF capacitor
+* 2x 0.1uF capacitor
+* S6B-PH-K-S (6-pin connector)
+* S3B-PH-K-S (3-pin connector)
+* S2B-PH-K-S (2-pin connector)
+* PJ-037A (power input)
+* RUEF185 (1.85A fuse)
+* 1N5819 (schottky diode for 5v input protection)
+* MJTP1243 (CAL switch, poor fit with V2 PCB)
+* WP934EW/GD (green LED)
+* 330ohm 1/4w resistor (for driving LED, poor fit with V2 PCB)
+* Ring terminal and wire for motor ground strap
 
 
 ## Changelog

@@ -43,7 +43,7 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 * In ERG mode:
      - Calibration is important here, there is a [calibration](#calibration) table that takes target power and current roller speed, and outputs stepper motor position (resistance)
      - Apps like Zwift and Trainerroad (any app with a Power Match function), will compensate if this calibration isn't perfect
-     - If for example, Zwift commands 300w, you are spinning at 15mph, the stepper motor goes to position=300, and your power meter reads 330w, Zwift will slowly ramp down it's target power until 300w is achieved
+     - If for example, Zwift commands 300w, you are spinning at 15mph, the stepper motor goes to position=300, and your power meter reads 330w, Zwift will slowly ramp down it's target power until 300w is achieved, maybe Zwift sends 275w target power and the new stepper position is 290 steps, Zwift will keep rechecking, if power is now 305w, Zwift will send 273w, the new stepper position is 289 steps, etc, etc, etc
      - The closer your calibration is, the quicker ERG mode will react to new power levels
      - Smart rollers have a narrower power band than a fixed trainer (like a Wahoo Kickr)
      - Fixed trainers can often complete all workouts without needing to shift gears

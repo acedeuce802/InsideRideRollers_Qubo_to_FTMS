@@ -227,3 +227,4 @@ See PCB schematic and design below
 - 2026-01-14_01 - Added LED states
 - 2026-01-14_02 - Fixed gMode LED states
 - 2026-01-14_03 - Added resistance curve when SIM or ERG not active
+- 2026-01-15_01 - Stepper disable if target doesn't move beyond threshold

@@ -33,7 +33,7 @@ enum LedPattern : uint8_t;  // forward declare the enum type
 #include <esp_partition.h>
 #include <esp_system.h>
 
-static const char* FW_VERSION = "2026-01-15_01";  // change each build
+static const char* FW_VERSION = "2026-01-15_02";  // change each build
 
 volatile ControlMode gMode = MODE_IDLE;
 
@@ -1765,15 +1765,26 @@ void setup() {
   Serial.println("Creating BLE server...");
   BLEDevice::init("InsideRideFTMS");
 
-
   // Create the BLE Server
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
-
   // Create the BLE Service
   Serial.println("Define service...");
   BLEService* pService = pServer->createService(FTMSDEVICE_FTMS_UUID);
+
+  // --- Device Information Service (0x180A) ---
+  BLEService* pDis = pServer->createService(BLEUUID((uint16_t)0x180A));
+
+  BLECharacteristic* chMan = pDis->createCharacteristic(BLEUUID((uint16_t)0x2A29), BLECharacteristic::PROPERTY_READ);
+  BLECharacteristic* chModel = pDis->createCharacteristic(BLEUUID((uint16_t)0x2A24), BLECharacteristic::PROPERTY_READ);
+  BLECharacteristic* chFw = pDis->createCharacteristic(BLEUUID((uint16_t)0x2A26), BLECharacteristic::PROPERTY_READ);
+
+  chMan->setValue("InsideRide / AW");
+  chModel->setValue("Qubo-FTMS-ESP32C6");
+  chFw->setValue(FW_VERSION);
+
+  
 
 
   // Create BLE Characteristics
@@ -1793,13 +1804,14 @@ void setup() {
   // Start the service
   Serial.println("Staring BLE service...");
   pService->start();
+  pDis->start();
 
   // FTMS Feature (0x2ACC) - enable Indoor Bike Simulation support.
   // This is the same payload you had in the working version.
-  uint8_t feature[8] = { 0x00, 0x00, 0x00, 0x00, 0x0C, 0x20, 0x00, 0x00 };
+  uint8_t feature[8] = { 0x02, 0x40, 0x00, 0x00, 0x0C, 0x20, 0x00, 0x00 };
   pFeature->setValue(feature, 8);
 
-
+/* commenting out to try to connect after a power meter
   // Start advertising
   Serial.println("Define the advertiser...");
   pAdvertising = BLEDevice::getAdvertising();
@@ -1810,6 +1822,39 @@ void setup() {
   pAdvertising->setMinPreferred(0x06);  // set value to 0x00 to not advertise this parameter
   Serial.println("Starting advertiser...");
   BLEDevice::startAdvertising();
+  */
+
+  // ===================== BLE Advertising (FTMS-first) =====================
+  BLEAdvertising* adv = BLEDevice::getAdvertising();
+  adv->stop();   // safety if restarting
+
+  // --- Primary advertising packet ---
+  BLEAdvertisementData advData;
+  advData.setFlags(0x06); // LE General Discoverable | BR/EDR Not Supported
+
+  // Complete list of 16-bit Service UUIDs: FTMS (0x1826)
+  // Length=3, Type=0x03, UUID=0x1826 (little-endian: 26 18)
+  advData.addData(String("\x03\x03\x26\x18", 4));
+
+  // --- Scan response packet ---
+  BLEAdvertisementData scanData;
+  scanData.setName("InsideRideFTMS");   // full name here
+
+  // Apply advertising data
+  adv->setAdvertisementData(advData);
+  adv->setScanResponseData(scanData);
+  adv->setScanResponse(true);
+
+  // Optional but recommended for Windows stability
+  adv->setMinPreferred(0x06);
+  adv->setMinPreferred(0x12);
+
+  // Start advertising
+  adv->start();
+
+  Serial.println("[BLE] Advertising started (FTMS in primary ADV)");
+
+
   Serial.println("Waiting a client connection to notify...");
 
 

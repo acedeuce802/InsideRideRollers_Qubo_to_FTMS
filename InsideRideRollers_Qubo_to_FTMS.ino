@@ -33,7 +33,7 @@ enum LedPattern : uint8_t;  // forward declare the enum type
 #include <esp_partition.h>
 #include <esp_system.h>
 
-static const char* FW_VERSION = "2026-01-14_03";  // change each build
+static const char* FW_VERSION = "2026-01-15_01";  // change each build
 
 volatile ControlMode gMode = MODE_IDLE;
 
@@ -320,6 +320,52 @@ static float    slowZoneSps     = 1000.0f;
 static int8_t   gLastDir = 0;              // -1, 0, +1
 static bool     gDirJustChanged = false;
 
+static const bool STEPPER_DIR_INVERT = false;   // set true to reverse motor direction
+static volatile bool    gStepEn     = false;
+
+// ---------------- Stepper thermal idle disable (all modes) ----------------
+static constexpr int32_t STEP_ON_DEADBAND_LOG  = 12;    // enable when |err| >= this
+static constexpr int32_t STEP_OFF_DEADBAND_LOG = 6;     // disable when |err| <= this (hysteresis)
+static constexpr uint32_t STEP_IDLE_OFF_MS     = 1500;  // must stay settled this long to disable
+
+static uint32_t gSettledSinceMs = 0;
+
+static inline int32_t iabs32(int32_t v) { return (v < 0) ? -v : v; }
+
+static void updateStepperEnableFromErrorAllModes() {
+  // Safety: always energized while homing or when a rehome is pending
+  if (gIsHoming || gRehomeRequested) {
+    if (!gStepEn) stepperEnable(true);
+    gSettledSinceMs = 0;
+    return;
+  }
+
+  const uint32_t now = millis();
+  const int32_t err = iabs32(logStepTarget - logStepPos);
+
+  if (!gStepEn) {
+    // Currently disabled: only enable when error is large enough
+    if (err >= STEP_ON_DEADBAND_LOG) {
+      stepperEnable(true);
+      gSettledSinceMs = 0;
+    }
+    return;
+  }
+
+  // Currently enabled: if we're within the OFF band, start/continue settle timer
+  if (err <= STEP_OFF_DEADBAND_LOG) {
+    if (gSettledSinceMs == 0) gSettledSinceMs = now;
+
+    if ((now - gSettledSinceMs) >= STEP_IDLE_OFF_MS) {
+      stepperEnable(false);
+      gSettledSinceMs = 0;
+    }
+  } else {
+    // Not settled anymore
+    gSettledSinceMs = 0;
+  }
+}
+
 // Compute interval from sps
 static inline uint32_t spsToIntervalUs(float sps) {
   if (sps < 50.0f) sps = 50.0f;
@@ -346,11 +392,6 @@ static inline void stepperPulseOnce() {
   digitalWrite(STEP_PIN, LOW);
   delayMicroseconds(stepIntervalUs);   // set by stepperSetSpeed()
 }
-
-
-static const bool STEPPER_DIR_INVERT = false;   // set true to reverse motor direction
-static volatile bool    gStepEn     = false;
-
 
 static inline void stepperSetDir(bool forward) {
   bool pinLevel = forward;
@@ -1943,6 +1984,7 @@ void loop() {
   }
 
   stepperGoto(target);
+  updateStepperEnableFromErrorAllModes();
   stepperUpdate();
 
 

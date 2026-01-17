@@ -33,7 +33,7 @@ enum LedPattern : uint8_t;  // forward declare the enum type
 #include <esp_partition.h>
 #include <esp_system.h>
 
-static const char* FW_VERSION = "2026-01-15_04";  // change each build
+static const char* FW_VERSION = "2026-01-16_01";  // change each build
 
 volatile ControlMode gMode = MODE_IDLE;
 
@@ -1813,7 +1813,7 @@ void setup() {
   advData.setFlags(0x06);
 
   // FTMS + CPS in primary ADV
-  advData.addData(String("\x05\x03\x26\x18\x18\x18", 6));
+  advData.addData(String("\x03\x03\x26\x18", 4));
 
   BLEAdvertisementData scanData;
   scanData.setName("InsideRideFTMS");
@@ -1826,6 +1826,7 @@ void setup() {
   adv->setMinPreferred(0x12);
 
   adv->start();
+  pDis->start();
 
   Serial.println("[BLE] Advertising started (FTMS+CPS in primary ADV)");
   Serial.println("Waiting for");

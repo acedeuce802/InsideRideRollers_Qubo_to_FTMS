@@ -33,7 +33,7 @@ enum LedPattern : uint8_t;  // forward declare the enum type
 #include <esp_partition.h>
 #include <esp_system.h>
 
-static const char* FW_VERSION = "2026-01-15_02";  // change each build
+static const char* FW_VERSION = "2026-01-15_04";  // change each build
 
 volatile ControlMode gMode = MODE_IDLE;
 
@@ -1771,7 +1771,7 @@ void setup() {
 
   // Create the BLE Service
   Serial.println("Define service...");
-  BLEService* pService = pServer->createService(FTMSDEVICE_FTMS_UUID);
+  BLEService* pService = pServer->createService(BLEUUID((uint16_t)0x1826)); // FTMS
 
   // --- Device Information Service (0x180A) ---
   BLEService* pDis = pServer->createService(BLEUUID((uint16_t)0x180A));
@@ -1789,14 +1789,14 @@ void setup() {
 
   // Create BLE Characteristics
   Serial.println("Define characteristics");
-  pIndoorBike = pService->createCharacteristic(FTMSDEVICE_INDOOR_BIKE_CHAR_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+  pIndoorBike   = pService->createCharacteristic(BLEUUID((uint16_t)0x2AD2), BLECharacteristic::PROPERTY_NOTIFY);
   pIndoorBike->addDescriptor(new BLE2902());
-  pControlPoint = pService->createCharacteristic(FTMSDEVICE_FTMS_CONTROL_POINT_CHAR_UUID, BLECharacteristic::PROPERTY_INDICATE | BLECharacteristic::PROPERTY_WRITE);
+  pControlPoint = pService->createCharacteristic(BLEUUID((uint16_t)0x2AD9), BLECharacteristic::PROPERTY_INDICATE | BLECharacteristic::PROPERTY_WRITE);
   pControlPoint->addDescriptor(new BLE2902());
   static ControlPointCallbacks sCpCb;
-  pFeature = pService->createCharacteristic(FTMSDEVICE_FTMS_FEATURE_CHAR_UUID, BLECharacteristic::PROPERTY_READ);
+  pFeature      = pService->createCharacteristic(BLEUUID((uint16_t)0x2ACC), BLECharacteristic::PROPERTY_READ);
   pFeature->addDescriptor(new BLE2902());
-  pStatus = pService->createCharacteristic(FTMSDEVICE_FTMS_STATUS_CHAR_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+  pStatus       = pService->createCharacteristic(BLEUUID((uint16_t)0x2ADA), BLECharacteristic::PROPERTY_NOTIFY);
   pStatus->addDescriptor(new BLE2902());
   pControlPoint->setCallbacks(&sCpCb);
 
@@ -1804,63 +1804,31 @@ void setup() {
   // Start the service
   Serial.println("Staring BLE service...");
   pService->start();
-  pDis->start();
 
-  // FTMS Feature (0x2ACC) - enable Indoor Bike Simulation support.
-  // This is the same payload you had in the working version.
-  uint8_t feature[8] = { 0x02, 0x40, 0x00, 0x00, 0x0C, 0x20, 0x00, 0x00 };
-  pFeature->setValue(feature, 8);
-
-/* commenting out to try to connect after a power meter
-  // Start advertising
-  Serial.println("Define the advertiser...");
-  pAdvertising = BLEDevice::getAdvertising();
-
-
-  pAdvertising->setScanResponse(true);
-  pAdvertising->addServiceUUID(FTMSDEVICE_FTMS_UUID);
-  pAdvertising->setMinPreferred(0x06);  // set value to 0x00 to not advertise this parameter
-  Serial.println("Starting advertiser...");
-  BLEDevice::startAdvertising();
-  */
-
-  // ===================== BLE Advertising (FTMS-first) =====================
+  // Optional scan response (keep it small). You can omit entirely.
   BLEAdvertising* adv = BLEDevice::getAdvertising();
-  adv->stop();   // safety if restarting
+  adv->stop();
 
-  // --- Primary advertising packet ---
   BLEAdvertisementData advData;
-  advData.setFlags(0x06); // LE General Discoverable | BR/EDR Not Supported
+  advData.setFlags(0x06);
 
-  // Complete list of 16-bit Service UUIDs: FTMS (0x1826)
-  // Length=3, Type=0x03, UUID=0x1826 (little-endian: 26 18)
-  advData.addData(String("\x03\x03\x26\x18", 4));
+  // FTMS + CPS in primary ADV
+  advData.addData(String("\x05\x03\x26\x18\x18\x18", 6));
 
-  // --- Scan response packet ---
   BLEAdvertisementData scanData;
-  scanData.setName("InsideRideFTMS");   // full name here
+  scanData.setName("InsideRideFTMS");
 
-  // Apply advertising data
   adv->setAdvertisementData(advData);
   adv->setScanResponseData(scanData);
-  adv->setScanResponse(true);
 
-  // Optional but recommended for Windows stability
+  // Optional connection param hints
   adv->setMinPreferred(0x06);
   adv->setMinPreferred(0x12);
 
-  // Start advertising
   adv->start();
 
-  Serial.println("[BLE] Advertising started (FTMS in primary ADV)");
-
-
-  Serial.println("Waiting a client connection to notify...");
-
-
+  Serial.println("[BLE] Advertising started (FTMS+CPS in primary ADV)");
   Serial.println("Waiting for");
-
-
   Serial.println("connection...");
 
   startApAndWeb();

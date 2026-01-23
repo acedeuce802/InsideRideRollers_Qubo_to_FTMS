@@ -213,41 +213,45 @@ static void ledUpdate() {
   }
 }
 
+// FIX: Track last state to only update LED pattern when state changes
+static LedPattern gLastComputedPattern = LED_OFF;
+
 static void ledSelectPattern() {
+  LedPattern newPattern;
+  
   // Highest priority first
   if (gOtaInProgress) {
-    ledSetPattern(LED_BLINK_FAST);
-    return;
+    newPattern = LED_BLINK_FAST;
   }
-
-  if (otaIsUnlocked()) {
-    ledSetPattern(LED_DOUBLE_BLIP);
-    return;
+  else if (otaIsUnlocked()) {
+    newPattern = LED_DOUBLE_BLIP;
   }
-
-  if (gRehomeRequested) {             // or any other "fault" latch you want
-    ledSetPattern(LED_TRIPLE_BLIP);
-    return;
+  else if (gRehomeRequested) {
+    newPattern = LED_TRIPLE_BLIP;
   }
-
-  if (gIsHoming) {
-    ledSetPattern(LED_BLINK_MED);
-    return;
+  else if (gIsHoming) {
+    newPattern = LED_BLINK_MED;
   }
-
-  if (deviceConnected) {
+  else if (deviceConnected) {
     switch (gMode) {
-      case MODE_ERG:  ledSetPattern(LED_SOLID);      return;
-      case MODE_SIM:  ledSetPattern(LED_BLINK_SLOW); return;
-      default:        ledSetPattern(LED_HEARTBEAT);  return;
+      case MODE_ERG:  newPattern = LED_SOLID;      break;
+      case MODE_SIM:  newPattern = LED_BLINK_SLOW; break;
+      default:        newPattern = LED_HEARTBEAT;  break;
     }
   }
-
-  // Not connected: show something simpler
-  switch (gMode) {
-    case MODE_ERG:  ledSetPattern(LED_SOLID);      break;   // optional
-    case MODE_SIM:  ledSetPattern(LED_BLINK_SLOW); break;   // optional
-    default:        ledSetPattern(LED_OFF);        break;
+  else {
+    // Not connected
+    switch (gMode) {
+      case MODE_ERG:  newPattern = LED_SOLID;      break;
+      case MODE_SIM:  newPattern = LED_BLINK_SLOW; break;
+      default:        newPattern = LED_OFF;        break;
+    }
+  }
+  
+  // Only update if pattern actually changed
+  if (newPattern != gLastComputedPattern) {
+    gLastComputedPattern = newPattern;
+    ledSetPattern(newPattern);
   }
 }
 
@@ -297,6 +301,18 @@ static float    stepSpeedSps   = 2500.0f;
 static uint32_t stepIntervalUs = 5000;
 static uint32_t lastStepUs     = 0;
 
+// FIX: Unified stepper enable/disable system
+// Single state machine for all enable/disable logic
+enum StepperEnableReason {
+  STEPPER_FORCE_ENABLE,     // Manual enable or homing
+  STEPPER_AUTO_SPEED,       // Speed-based control
+  STEPPER_AUTO_ERROR        // Error-based control
+};
+
+static bool gStepperForceEnabled = false;
+static bool gStepperSpeedDisabled = false;
+static bool gStepperErrorSettled = false;
+
 // -------- Stepper disable below speed --------
 static constexpr float SPEED_DISABLE_MPH = 2.0f;   // disable if below this
 static constexpr float SPEED_ENABLE_MPH  = 2.3f;   // re-enable above this (hysteresis)
@@ -329,40 +345,66 @@ static constexpr int32_t STEP_OFF_DEADBAND_LOG = 6;     // disable when |err| <=
 static constexpr uint32_t STEP_IDLE_OFF_MS     = 1500;  // must stay settled this long to disable
 
 static uint32_t gSettledSinceMs = 0;
+static uint32_t gBelowSpeedSinceMs = 0;
 
 static inline int32_t iabs32(int32_t v) { return (v < 0) ? -v : v; }
 
-static void updateStepperEnableFromErrorAllModes() {
-  // Safety: always energized while homing or when a rehome is pending
-  if (gIsHoming || gRehomeRequested) {
-    if (!gStepEn) stepperEnable(true);
-    gSettledSinceMs = 0;
-    return;
-  }
-
+// FIX: Unified stepper enable/disable logic
+static void updateStepperEnable(float mph) {
   const uint32_t now = millis();
-  const int32_t err = iabs32(logStepTarget - logStepPos);
-
-  if (!gStepEn) {
-    // Currently disabled: only enable when error is large enough
-    if (err >= STEP_ON_DEADBAND_LOG) {
-      stepperEnable(true);
-      gSettledSinceMs = 0;
+  
+  // Always force enable during homing or when rehome is pending
+  if (gIsHoming || gRehomeRequested) {
+    if (!gStepEn) {
+      gStepEn = true;
+      digitalWrite(ENABLE_PIN, LOW);
     }
+    gStepperForceEnabled = true;
+    gSettledSinceMs = 0;
+    gBelowSpeedSinceMs = 0;
     return;
   }
-
-  // Currently enabled: if we're within the OFF band, start/continue settle timer
+  
+  gStepperForceEnabled = false;
+  
+  // Check speed-based disable
+  if (mph < SPEED_DISABLE_MPH) {
+    if (gBelowSpeedSinceMs == 0) gBelowSpeedSinceMs = now;
+    if (now - gBelowSpeedSinceMs >= SPEED_HOLDOFF_MS) {
+      gStepperSpeedDisabled = true;
+    }
+  } else if (mph > SPEED_ENABLE_MPH) {
+    gStepperSpeedDisabled = false;
+    gBelowSpeedSinceMs = 0;
+  }
+  
+  // Check error-based settling
+  const int32_t err = iabs32(logStepTarget - logStepPos);
   if (err <= STEP_OFF_DEADBAND_LOG) {
     if (gSettledSinceMs == 0) gSettledSinceMs = now;
-
     if ((now - gSettledSinceMs) >= STEP_IDLE_OFF_MS) {
-      stepperEnable(false);
-      gSettledSinceMs = 0;
+      gStepperErrorSettled = true;
     }
   } else {
-    // Not settled anymore
+    gStepperErrorSettled = false;
     gSettledSinceMs = 0;
+  }
+  
+  // Determine final enable state
+  bool shouldEnable = !gStepperSpeedDisabled && 
+                      (!gStepperErrorSettled || err >= STEP_ON_DEADBAND_LOG);
+  
+  if (shouldEnable != gStepEn) {
+    gStepEn = shouldEnable;
+    digitalWrite(ENABLE_PIN, shouldEnable ? LOW : HIGH);
+    
+    if (shouldEnable) {
+      // reset ramp timing when enabling
+      gLastDir   = 0;
+      rampCurSps = min(rampStartSps, runSpeedSps);
+      rampLastUs = micros();
+      lastStepUs = 0;
+    }
   }
 }
 
@@ -372,9 +414,6 @@ static inline uint32_t spsToIntervalUs(float sps) {
   if (sps > 5000.0f) sps = 5000.0f;
   return (uint32_t)(1000000.0f / sps + 0.5f);
 }
-
-static uint32_t gBelowSpeedSinceMs = 0;
-static bool gStepperAutoDisabled = false;
 
 static void stepperSetJogSpeed() {
   stepperSetSpeed(jogSpeedSps);
@@ -397,47 +436,13 @@ static inline void stepperSetDir(bool forward) {
   bool pinLevel = forward;
   if (STEPPER_DIR_INVERT) pinLevel = !pinLevel;
   digitalWrite(DIR_PIN, pinLevel ? HIGH : LOW);
-
-
-  static uint32_t lastPrintMs = 0;
-  uint32_t now = millis();
-  if (now - lastPrintMs > 200) {
-    lastPrintMs = now;
-    //Serial.printf("[DIR] forward=%d invert=%d -> DIR=%d (pin %d)\n",
-    //              (int)forward, (int)STEPPER_DIR_INVERT, (int)pinLevel, DIR_PIN);
-  }
-}
-
-static void updateStepperEnableFromSpeed(float mph) {
-  const uint32_t now = millis();
-
-  // If currently enabled, start a timer when we go below threshold
-  if (!gStepperAutoDisabled) {
-    if (mph < SPEED_DISABLE_MPH) {
-      if (gBelowSpeedSinceMs == 0) gBelowSpeedSinceMs = now;
-      if (now - gBelowSpeedSinceMs >= SPEED_HOLDOFF_MS) {
-        stepperEnable(false);
-        gStepperAutoDisabled = true;
-      }
-    } else {
-      gBelowSpeedSinceMs = 0; // reset timer if speed comes back up
-    }
-  }
-  // If currently disabled, re-enable only when above a higher threshold
-  else {
-    if (mph > SPEED_ENABLE_MPH) {
-      stepperEnable(true);
-      gStepperAutoDisabled = false;
-      gBelowSpeedSinceMs = 0;
-    }
-  }
 }
 
 //Guarded SpeedFromPos stuff
 static constexpr float MAX_POWER_W = 2000.0f;
 
 
-// “Online monotonic” deltas (tune)
+// "Online monotonic" deltas (tune)
 static constexpr float MONO_DMPH = 0.5f;   // mph
 static constexpr float MONO_DPOS = 5.0f;   // logical units (0–1000)
 
@@ -511,10 +516,11 @@ static void startApAndWeb() {
   server.on("/goto_hold", HTTP_GET, handleGotoHold);
   server.on("/resume_zwift", HTTP_POST, handleResumeZwift);
 
-  // OTA endpoints
-    // OTA endpoints (CORRECT PATTERN)
+  // FIX: Correct OTA endpoint registration
   server.on("/update", HTTP_GET, handleUpdateForm);
-  server.on("/update", HTTP_POST, handleUpdatePostFinalizer, handleUpdateUpload);
+  server.on("/update", HTTP_POST, 
+            []() { handleUpdatePostFinalizer(); }, 
+            handleUpdateUpload);
 
   server.begin();
   Serial.println("[HTTP] Server started");
@@ -525,6 +531,15 @@ static void startApAndWeb() {
 static volatile uint32_t gLastHallUs     = 0;
 static volatile uint32_t gHallIntervalUs = 0;
 static volatile uint32_t gHallEdges      = 0;
+
+// FIX: Add atomic read helper for multi-byte volatile variables
+// Simple approach: read both values atomically without struct
+static void atomicReadHallData(uint32_t* intervalUs, uint32_t* lastUs) {
+  noInterrupts();
+  *intervalUs = gHallIntervalUs;
+  *lastUs = gLastHallUs;
+  interrupts();
+}
 
 
 static const uint8_t HALL_PULSES_PER_REV = 6;     // you said 6 magnets per revolution
@@ -586,11 +601,8 @@ void IRAM_ATTR hallISR() {
 
 
 static float readRPM() {
-  noInterrupts();
-  uint32_t dt   = gHallIntervalUs;
-  uint32_t last = gLastHallUs;
-  interrupts();
-
+  uint32_t dt, last;
+  atomicReadHallData(&dt, &last);
 
   if (last == 0) return 0.0f;
   if ((micros() - last) > 1000000UL) return 0.0f; // stopped >1s
@@ -659,8 +671,9 @@ double Z[Xcount][Ycount] = {
 
 
 // ==================== Power from Speed/Pos Bilinear Interpolation =========================
+// FIX: Initialize xIndex and yIndex
 double powerFromSpeedPos(double x, double y) {
-  int xIndex, yIndex;
+  int xIndex = 0, yIndex = 0;
 
 
   if ((x < X[0]) || (x > X[Xcount - 1])) {
@@ -687,21 +700,7 @@ double powerFromSpeedPos(double x, double y) {
       yIndex = i;
       break;
     }
-/*
-  Serial.print(F("X:"));
-  Serial.print(x);
-  Serial.print(F(" in ["));
-  Serial.print(X[xIndex]);
-  Serial.print(F(","));
-  Serial.print(X[xIndex + 1]);
-  Serial.print(F("] and Y:"));
-  Serial.print(y);
-  Serial.print(F(" in ["));
-  Serial.print(Y[yIndex]);
-  Serial.print(F(","));
-  Serial.print(Y[yIndex + 1]);
-  Serial.println(F("]"));
-*/
+
   // https://en.wikipedia.org/wiki/Bilinear_interpolation
   // Q11 = (x1, y1), Q12 = (x1, y2), Q21 = (x2, y1), and Q22 = (x2, y2)
   double x1, y1, x2, y2;
@@ -756,8 +755,9 @@ double Zw[Xcountw][Ycountw] = {
 
 
 // ==================== Steps from Speed/Power Bilinear Interpolation =========================
+// FIX: Initialize xIndexw and yIndexw
 double stepFromPowerSpeed(double xw, double yw) {
-  int xIndexw, yIndexw;
+  int xIndexw = 0, yIndexw = 0;
 
 
   if ((xw < Xw[0]) || (xw > Xw[Xcountw - 1])) {
@@ -784,21 +784,7 @@ double stepFromPowerSpeed(double xw, double yw) {
       yIndexw = iw;
       break;
     }
-/*
-  Serial.print(F("X:"));
-  Serial.print(x);
-  Serial.print(F(" in ["));
-  Serial.print(X[xIndex]);
-  Serial.print(F(","));
-  Serial.print(X[xIndex + 1]);
-  Serial.print(F("] and Y:"));
-  Serial.print(y);
-  Serial.print(F(" in ["));
-  Serial.print(Y[yIndex]);
-  Serial.print(F(","));
-  Serial.print(Y[yIndex + 1]);
-  Serial.println(F("]"));
-*/
+
   // https://en.wikipedia.org/wiki/Bilinear_interpolation
   // Q11 = (x1, y1), Q12 = (x1, y2), Q21 = (x2, y1), and Q22 = (x2, y2)
   double x1w, y1w, x2w, y2w;
@@ -944,29 +930,6 @@ static void requestRehome(const char* why) {
   Serial.printf("[SAFETY] Limit hit -> rehome requested (%s)\n", why);
 }
 
-/*
-// ===================== Grade -> target steps (simple linear mapping) =====================
-static int32_t gradeToSteps(float gradePercent) {
-  const float MIN_GRADE = -2.0f;   // lowest resistance
-  const float MAX_GRADE = 20.0f;   // highest resistance
-
-
-  // Clamp grade first
-  if (gradePercent < MIN_GRADE) gradePercent = MIN_GRADE;
-  if (gradePercent > MAX_GRADE) gradePercent = MAX_GRADE;
-
-
-  // Normalize to 0..1
-  float t = (gradePercent - MIN_GRADE) / (MAX_GRADE - MIN_GRADE);
-
-
-  // Map to step range
-  return (int32_t)lroundf(
-    LOGICAL_MIN + t * (LOGICAL_MAX - LOGICAL_MIN)
-  );
-}
-*/
-
 // ===================== Stepper from Speed/Grade Calibration data (5x5) =====================
 double Xstep [] = { 0, 5, 10, 15, 20, 25, 30, 50 };
 double Ystep [] = { -4, 0, 2, 4, 6, 8, 10 };
@@ -989,8 +952,9 @@ double Zstep[Xcountstep][Ycountstep] = {
 
 
 // ==================== Stepper from Speed/Grade Bilinear Interpolation =========================
+// FIX: Initialize xIndexstep and yIndexstep
 double gradeToSteps(double xstep, double ystep) {
-  int xIndexstep, yIndexstep;
+  int xIndexstep = 0, yIndexstep = 0;
 
 
   if ((xstep < Xstep[0]) || (xstep > Xstep[Xcountstep - 1])) {
@@ -1017,21 +981,7 @@ double gradeToSteps(double xstep, double ystep) {
       yIndexstep = istep;
       break;
     }
-/*
-  Serial.print(F("X:"));
-  Serial.print(x);
-  Serial.print(F(" in ["));
-  Serial.print(X[xIndex]);
-  Serial.print(F(","));
-  Serial.print(X[xIndex + 1]);
-  Serial.print(F("] and Y:"));
-  Serial.print(y);
-  Serial.print(F(" in ["));
-  Serial.print(Y[yIndex]);
-  Serial.print(F(","));
-  Serial.print(Y[yIndex + 1]);
-  Serial.println(F("]"));
-*/
+
   // https://en.wikipedia.org/wiki/Bilinear_interpolation
   // Q11 = (x1, y1), Q12 = (x1, y2), Q21 = (x2, y1), and Q22 = (x2, y2)
   double x1step, y1step, x2step, y2step;
@@ -1066,7 +1016,6 @@ static void stepperGoto(int32_t pos) {
   if (pos < LOGICAL_MIN) pos = LOGICAL_MIN;
   if (pos > LOGICAL_MAX) pos = LOGICAL_MAX;
   logStepTarget = pos;
-  //Serial.printf("[STEP] goto=%ld\n", (long)logStepTarget);
 }
 
 
@@ -1154,14 +1103,12 @@ int value = 0;  //This is the value sent as "nothing".  We need to send somethin
 
 #define FTMSDEVICE_FTMS_UUID "00001826-0000-1000-8000-00805F9B34FB"
 #define FTMSDEVICE_INDOOR_BIKE_CHAR_UUID "00002AD2-0000-1000-8000-00805F9B34FB"
-//#define FTMSDEVICE_RESISTANCE_RANGE_CHAR_UUID "00002AD6-0000-1000-8000-00805F9B34FB"
-//#define FTMSDEVICE_POWER_RANGE_CHAR_UUID "00002AD8-0000-1000-8000-00805F9B34FB"
 #define FTMSDEVICE_FTMS_FEATURE_CHAR_UUID "00002ACC-0000-1000-8000-00805F9B34FB"
 #define FTMSDEVICE_FTMS_CONTROL_POINT_CHAR_UUID "00002AD9-0000-1000-8000-00805F9B34FB"
 #define FTMSDEVICE_FTMS_STATUS_CHAR_UUID "00002ADA-0000-1000-8000-00805F9B34FB"
 
 
-static uint32_t nextControlAllowedMs = 0;   // replaces whileMillis/while spin
+static uint32_t nextControlAllowedMs = 0;
 static uint32_t lastFtmsNotifyMs     = 0;
 static const uint32_t FTMS_NOTIFY_PERIOD_MS = 100; // 10 Hz
 
@@ -1227,25 +1174,22 @@ static const char* modeName(ControlMode m) {
 }
 
 static void printDiag() {
-Serial.printf(
-  "Grade=%.2f%% | Step Position=%ld Steps | Speed=%.2f MPH | Est Power=%d W | ERG Target =%d W | FTMS State=%s\n" ,
-  gradeFloat,
-  (long)logStepPos,
-  currentSpeedMph,
-  currentEstPower,
-  ergTargetW,
-  modeName(gMode)
-);
+  Serial.printf(
+    "Grade=%.2f%% | Step Position=%ld Steps | Speed=%.2f MPH | Est Power=%d W | ERG Target =%d W | FTMS State=%s\n" ,
+    gradeFloat,
+    (long)logStepPos,
+    currentSpeedMph,
+    currentEstPower,
+    ergTargetW,
+    modeName(gMode)
+  );
 
-
-Serial.printf("grade=%.2f tgtLogical=%ld physTgt=%ld physPos=%ld logPos=%ld\n",
-              gradeFloat,
-              (long)logStepTarget,
-              (long)logicalToSteps(logStepTarget),
-              (long)physStepPos,
-              (long)logStepPos);
-
-
+  Serial.printf("grade=%.2f tgtLogical=%ld physTgt=%ld physPos=%ld logPos=%ld\n",
+                gradeFloat,
+                (long)logStepTarget,
+                (long)logicalToSteps(logStepTarget),
+                (long)physStepPos,
+                (long)logStepPos);
 }
 
 
@@ -1297,9 +1241,9 @@ class ControlPointCallbacks : public BLECharacteristicCallbacks {
         {
           int16_t w = (int16_t)((uint16_t)rx[1] | ((uint16_t)rx[2] << 8));
           w = constrain(w, 0, 4000);
-          ergTargetW = w;         // IMPORTANT: update global (no shadowing)
+          ergTargetW = w;
           gLastErgRxMs = millis();
-          gMode = MODE_ERG;       // <<< mode set here
+          gMode = MODE_ERG;
         }
 
         ftmsState = 5;
@@ -1321,9 +1265,8 @@ class ControlPointCallbacks : public BLECharacteristicCallbacks {
         int16_t gradeRaw = (int16_t)((rx[4] << 8) | rx[3]);
 
         gradeFloat = gradeRaw / 100.0f;
-        /*if (gradeFloat < 0) gradeFloat *= 2.0f;*/
 
-        gMode = MODE_SIM;                      // <<< mode set here
+        gMode = MODE_SIM;
 
         ftmsState = 11;
         ftmsAck(0x11, 0x01);
@@ -1346,7 +1289,7 @@ static void otaMarkAppValidAfterBoot() {
   if (err == ESP_OK) {
     Serial.println("[OTA] App marked VALID (rollback canceled if pending).");
   } else if (err == ESP_ERR_OTA_ROLLBACK_INVALID_STATE) {
-    // Normal if rollback isn’t enabled or app isn't in pending state.
+    // Normal if rollback isn't enabled or app isn't in pending state.
     Serial.println("[OTA] Rollback not pending (or not enabled).");
   } else {
     Serial.printf("[OTA] Mark valid failed: %d\n", (int)err);
@@ -1503,7 +1446,7 @@ static void handleGoto() {
   if (pos < LOGICAL_MIN) pos = LOGICAL_MIN;
   if (pos > LOGICAL_MAX) pos = LOGICAL_MAX;
 
-  stepperEnable(true);     // optional: auto-enable on goto
+  stepperEnable(true);
   stepperGoto((int32_t)pos);
 
   server.sendHeader("Location", "/");
@@ -1522,12 +1465,10 @@ static void handleGotoHold() {
   gManualHoldTarget = pos;
   gManualHoldActive = true;
 
-  // Optional: ensure stepper enabled when user commands a hold
   stepperEnable(true);
 
   Serial.printf("[WEB] Manual HOLD active: target=%ld\n", (long)pos);
 
-  // Redirect back to root
   server.sendHeader("Location", "/", true);
   server.send(303);
 }
@@ -1709,7 +1650,6 @@ static void handleUpdatePostFinalizer() {
   }
 
   if (!gOtaDone) {
-    // Should not happen often, but keeps behavior deterministic
     server.send(500, "text/plain", "OTA not completed.");
     return;
   }
@@ -1736,26 +1676,22 @@ void setup() {
   pinMode(ENABLE_PIN, OUTPUT);
   digitalWrite(ENABLE_PIN, HIGH);
 
-
   pinMode(LIMIT_PIN, INPUT_PULLUP);
   pinMode(HALL_PIN, INPUT_PULLUP);
   pinMode(CAL_BTN_PIN, INPUT_PULLUP);
   pinMode(LED_PIN, OUTPUT);
 
   ledWrite(false);
-  ledSetPattern(LED_BLINK_MED); // optional “boot” indication
+  ledSetPattern(LED_BLINK_MED);
 
   Serial.println("Starting initialisation routine");
 
-
   runSpeedSps = 2500.0f;
   jogSpeedSps = 1600.0f;
-  stepperSetRunSpeed();   // safer at boot for homing
-
+  stepperSetRunSpeed();
 
   stepperEnable(true);
   homeStepper();
-
 
   attachInterrupt(digitalPinToInterrupt(HALL_PIN), hallISR, FALLING);
 
@@ -1765,15 +1701,12 @@ void setup() {
   Serial.println("Creating BLE server...");
   BLEDevice::init("InsideRideFTMS");
 
-  // Create the BLE Server
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
-  // Create the BLE Service
   Serial.println("Define service...");
-  BLEService* pService = pServer->createService(BLEUUID((uint16_t)0x1826)); // FTMS
+  BLEService* pService = pServer->createService(BLEUUID((uint16_t)0x1826));
 
-  // --- Device Information Service (0x180A) ---
   BLEService* pDis = pServer->createService(BLEUUID((uint16_t)0x180A));
 
   BLECharacteristic* chMan = pDis->createCharacteristic(BLEUUID((uint16_t)0x2A29), BLECharacteristic::PROPERTY_READ);
@@ -1784,10 +1717,6 @@ void setup() {
   chModel->setValue("Qubo-FTMS-ESP32C6");
   chFw->setValue(FW_VERSION);
 
-  
-
-
-  // Create BLE Characteristics
   Serial.println("Define characteristics");
   pIndoorBike   = pService->createCharacteristic(BLEUUID((uint16_t)0x2AD2), BLECharacteristic::PROPERTY_NOTIFY);
   pIndoorBike->addDescriptor(new BLE2902());
@@ -1800,19 +1729,15 @@ void setup() {
   pStatus->addDescriptor(new BLE2902());
   pControlPoint->setCallbacks(&sCpCb);
 
-
-  // Start the service
   Serial.println("Staring BLE service...");
   pService->start();
 
-  // Optional scan response (keep it small). You can omit entirely.
   BLEAdvertising* adv = BLEDevice::getAdvertising();
   adv->stop();
 
   BLEAdvertisementData advData;
   advData.setFlags(0x06);
 
-  // FTMS + CPS in primary ADV
   advData.addData(String("\x03\x03\x26\x18", 4));
 
   BLEAdvertisementData scanData;
@@ -1821,7 +1746,6 @@ void setup() {
   adv->setAdvertisementData(advData);
   adv->setScanResponseData(scanData);
 
-  // Optional connection param hints
   adv->setMinPreferred(0x06);
   adv->setMinPreferred(0x12);
 
@@ -1833,25 +1757,13 @@ void setup() {
   Serial.println("connection...");
 
   startApAndWeb();
-
 }
-
-
-/*
-  The main loop which runs continuously.
-  Checks whether something is connected
-  - Receive bike simulation data, adjust the trainer and send acknowledgement back
-*/
-
-
 
 
 void loop() {
   server.handleClient();
-  // If OTA is running, do not do BLE notify / stepper / heavy Serial prints.
-  // Keep loop tight so WiFi can receive upload data reliably.
+  
   if (gOtaInProgress) {
-    // Only service web + button (optional) while uploading.
     ledSelectPattern();
     ledUpdate();
     delay(1);
@@ -1864,60 +1776,47 @@ void loop() {
   static uint32_t bleDelayMs = 0;
   const int bleDelayTime = 100;
   static uint32_t lastPowerNotifyMs = 0;
-  const uint32_t POWER_NOTIFY_PERIOD_MS = 100; // 10 Hz
+  const uint32_t POWER_NOTIFY_PERIOD_MS = 100;
 
   if (millis() - delayMs >= printTime){
     printDiag();
-    /*Serial.printf("simAgeMs=%lu\n", (unsigned long)(millis() - gLastSimRxMs));*/
     delayMs = millis();
   }
 
   float rpmRaw = readRPM();
   static uint32_t lastIbDataMs = 0;
 
-
-  // Exponential smoothing with time-based alpha
   if (gLastRpmFilterMs == 0) gLastRpmFilterMs = nowMs;
   float dtS = (nowMs - gLastRpmFilterMs) * 0.001f;
   gLastRpmFilterMs = nowMs;
 
-  
-
-  // alpha = dt / (tau + dt)
   float alpha = (dtS <= 0) ? 1.0f : (dtS / (RPM_FILTER_TAU_S + dtS));
 
-
-  // If you stop, let it decay quickly to 0 instead of lingering forever
   if (rpmRaw < 0.5f) {
-    alpha = 0.35f; // quicker decay when stopping
+    alpha = 0.35f;
   }
-
 
   gRpmFiltered = gRpmFiltered + alpha * (rpmRaw - gRpmFiltered);
   currentRPM = gRpmFiltered;
   currentSpeedMph = rpmToMph(currentRPM);
 
-  updateStepperEnableFromSpeed(currentSpeedMph);
+  // FIX: Unified stepper enable/disable (replaces both previous functions)
+  updateStepperEnable(currentSpeedMph);
 
   updateLimitDebounce();
 
-  // If the limit is hit during normal operation, schedule a rehome.
-  // (This covers cases where you drift and physically touch the switch.)
   if (!gIsHoming && limitPressed()) {
     requestRehome("limitPressed in loop");
   }
 
-  // Perform rehome if requested
   if (gRehomeRequested && !gIsHoming) {
     gRehomeRequested = false;
 
-    // Optional: pause control updates while homing
     ControlMode prevMode = gMode;
     gMode = MODE_IDLE;
 
     gIsHoming = true;
 
-    // Ensure motor is enabled and use jog speed for homing
     stepperEnable(true);
     bool ok = homeStepper();
 
@@ -1925,59 +1824,48 @@ void loop() {
 
     if (!ok) {
       Serial.println("[SAFETY] Rehome failed (timeout). Holding position.");
-      // You might choose to disable motor here:
-      // stepperEnable(false);
       gMode = MODE_IDLE;
       tgtLogical = 0;
     } else {
       Serial.println("[SAFETY] Rehome complete.");
-      // After homing, return to previous mode
       gMode = prevMode;
-
-      // Force target to current position initially to prevent sudden jump
       tgtLogical = logStepPos;
     }
   }
 
-
   static uint32_t lastTargetUpdateMs = 0;
-  if (millis() - lastTargetUpdateMs >= 50) { // 20 Hz target update
+  if (millis() - lastTargetUpdateMs >= 50) {
     lastTargetUpdateMs = millis();
 
-    ControlMode mode = gMode; // read volatile once
+    ControlMode mode = gMode;
 
     if (mode == MODE_ERG) {
-      // ERG: compute target from speed + target watts continuously
-      int16_t w = ergTargetW; // read volatile once
+      int16_t w = ergTargetW;
       int32_t t = (int32_t)lround(stepFromPowerSpeed((double)currentSpeedMph,
                                                     (double)w));
       t = constrain(t, LOGICAL_MIN, LOGICAL_MAX);
       tgtLogical = t;
     }
     else if (mode == MODE_SIM) {
-    double gradeClamp = gradeFloat;
+      double gradeClamp = gradeFloat;
 
-    // clamp grade to table range
-    if (gradeClamp < Ystep[0]) gradeClamp = Ystep[0];
-    if (gradeClamp > Ystep[Ycountstep - 1]) gradeClamp = Ystep[Ycountstep - 1];
+      if (gradeClamp < Ystep[0]) gradeClamp = Ystep[0];
+      if (gradeClamp > Ystep[Ycountstep - 1]) gradeClamp = Ystep[Ycountstep - 1];
 
-    // clamp speed to table range (or allow your function to handle it)
-    double speedClamp = currentSpeedMph;
-    if (speedClamp < Xstep[0]) speedClamp = Xstep[0];
-    if (speedClamp > Xstep[Xcountstep - 1]) speedClamp = Xstep[Xcountstep - 1];
+      double speedClamp = currentSpeedMph;
+      if (speedClamp < Xstep[0]) speedClamp = Xstep[0];
+      if (speedClamp > Xstep[Xcountstep - 1]) speedClamp = Xstep[Xcountstep - 1];
 
-    int32_t t = (int32_t)lround(gradeToSteps(speedClamp, gradeClamp));
-    tgtLogical = constrain(t, LOGICAL_MIN, LOGICAL_MAX);
-
+      int32_t t = (int32_t)lround(gradeToSteps(speedClamp, gradeClamp));
+      tgtLogical = constrain(t, LOGICAL_MIN, LOGICAL_MAX);
     }
     else {
+      // MODE_IDLE: polynomial curve based on speed
       double speedDumbCurve = currentSpeedMph;
 
-      // Optional clamp of input domain for curve-fit validity
       if (speedDumbCurve < Xstep[0]) speedDumbCurve = Xstep[0];
       if (speedDumbCurve > Xstep[Xcountstep - 1]) speedDumbCurve = Xstep[Xcountstep - 1];
 
-      // y = -8.95 + 20.3x - 0.597x^2 + 0.0101x^3
       double stepDumbCurve =
           -8.95
         + 20.3  * speedDumbCurve
@@ -1992,53 +1880,42 @@ void loop() {
   int32_t target;
 
   if (gManualHoldActive) {
-    target = gManualHoldTarget;     // manual override wins
+    target = gManualHoldTarget;
   } else {
-    target = tgtLogical;            // Zwift control (ERG/SIM)
+    target = tgtLogical;
   }
 
   stepperGoto(target);
-  updateStepperEnableFromErrorAllModes();
   stepperUpdate();
 
-
-
   if (deviceConnected && millis() - lastPowerNotifyMs >= POWER_NOTIFY_PERIOD_MS) {
-  lastPowerNotifyMs = millis();
+    lastPowerNotifyMs = millis();
 
-  // --- Compute estimated power ---
-  currentEstPower = (int)lround(
-    powerFromSpeedPos(
-      (double)currentSpeedMph,
-      (double)logStepPos
+    currentEstPower = (int)lround(
+      powerFromSpeedPos(
+        (double)currentSpeedMph,
+        (double)logStepPos
       )
     );
     
-    
-    // cadence: 0 below 2 mph, 90 rpm above 2 mph
     uint16_t cadence_rpm = (currentSpeedMph < 2.0f) ? 0 : 90;
-    uint16_t cadence_ftms = cadence_rpm * 2; // 0.5 rpm units
+    uint16_t cadence_ftms = cadence_rpm * 2;
 
-    // write cadence at bytes [4..5] (per layout above)
     FTMSDEVICE_INDOOR_BIKE_CHARData[4] = (uint8_t)(cadence_ftms & 0xFF);
     FTMSDEVICE_INDOOR_BIKE_CHARData[5] = (uint8_t)(cadence_ftms >> 8);
 
-    // write power at bytes [6..7]
     int16_t p = (int16_t)constrain(currentEstPower, 0, 2000);
     FTMSDEVICE_INDOOR_BIKE_CHARData[6] = (uint8_t)(p & 0xFF);
     FTMSDEVICE_INDOOR_BIKE_CHARData[7] = (uint8_t)((uint16_t)p >> 8);
 
-    // notify with correct length (10)
     pIndoorBike->setValue(FTMSDEVICE_INDOOR_BIKE_CHARData, sizeof(FTMSDEVICE_INDOOR_BIKE_CHARData));
     pIndoorBike->notify();
-
   }
 
-  // Press CAL to unlock OTA window
   if (calPressedEdge()) {
     otaUnlockNow();
   }
+  
   ledSelectPattern();
   ledUpdate();
 }
-

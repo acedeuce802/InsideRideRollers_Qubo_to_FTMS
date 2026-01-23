@@ -33,7 +33,7 @@ enum LedPattern : uint8_t;  // forward declare the enum type
 #include <esp_partition.h>
 #include <esp_system.h>
 
-static const char* FW_VERSION = "2026-01-16_01";  // change each build
+static const char* FW_VERSION = "2026-01-23_01";  // change each build
 
 volatile ControlMode gMode = MODE_IDLE;
 

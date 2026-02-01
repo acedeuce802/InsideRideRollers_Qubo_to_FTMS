@@ -26,6 +26,7 @@ extern BLECharacteristic* pStatus;
 void bleInit();
 void bleNotifyPower(float watts, float speedMph, float cadenceRpm);
 void bleNotifyStatus(uint8_t status);
+void bleKeepAlive();  // Call periodically to prevent BLE from going dormant
 
 // ==================== CONTROL POINT HANDLERS ====================
 // These are called by BLE callbacks when Zwift sends commands

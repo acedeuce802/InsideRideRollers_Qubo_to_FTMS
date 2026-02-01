@@ -218,7 +218,7 @@ void bleInit() {
   pAdvertising->setAdvertisementData(advData);
   pAdvertising->setScanResponseData(scanData);
   pAdvertising->setMinPreferred(0x06);
-  pAdvertising->setMinPreferred(0x12);
+  pAdvertising->setMaxPreferred(0x12);
   
   pAdvertising->start();
   
@@ -270,8 +270,60 @@ void bleNotifyPower(float watts, float speedMph, float cadenceRpm) {
 
 void bleNotifyStatus(uint8_t status) {
   if (!deviceConnected || pStatus == NULL) return;
-  
+
   uint8_t data[2] = {status, 0x00};
   pStatus->setValue(data, 2);
   pStatus->notify();
+}
+
+// ==================== BLE KEEP-ALIVE ====================
+// Periodically restart advertising to prevent BLE from becoming dormant
+// Also detects RPM activity to wake from idle state
+
+static uint32_t lastAdvertisingRestartMs = 0;
+static constexpr uint32_t ADVERTISING_RESTART_INTERVAL_MS = 30000;  // Every 30 seconds
+static bool wasIdle = true;  // Track idle state for RPM wake detection
+
+void bleKeepAlive() {
+  // Only restart advertising when NOT connected
+  if (deviceConnected) {
+    lastAdvertisingRestartMs = millis();  // Reset timer while connected
+    wasIdle = false;
+    return;
+  }
+
+  // Get current RPM from sensors (declared in sensors.h)
+  extern float currentRPM;
+  bool hasActivity = (currentRPM > 5.0f);  // Consider >5 RPM as activity
+
+  // Wake on RPM: If we were idle and now detect pedaling, restart advertising immediately
+  if (wasIdle && hasActivity) {
+    wasIdle = false;
+    lastAdvertisingRestartMs = millis();
+
+    BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
+    pAdvertising->stop();
+    delay(10);
+    pAdvertising->start();
+
+    Serial.println("[BLE] Advertising restarted (RPM wake)");
+    return;
+  }
+
+  // Track idle state
+  if (!hasActivity) {
+    wasIdle = true;
+  }
+
+  // Periodically restart advertising to stay discoverable
+  if (millis() - lastAdvertisingRestartMs >= ADVERTISING_RESTART_INTERVAL_MS) {
+    lastAdvertisingRestartMs = millis();
+
+    BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
+    pAdvertising->stop();
+    delay(10);  // Brief pause
+    pAdvertising->start();
+
+    Serial.println("[BLE] Advertising restarted (keep-alive)");
+  }
 }

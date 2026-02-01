@@ -41,6 +41,7 @@ void setup() {
   // Initialize subsystems
   ledInit();
   stepperInit();
+  stepperHome();       // Home stepper on power-up
   sensorsInit();       // Initialize Hall sensor
   bleInit();
   webServerInit();
@@ -114,7 +115,7 @@ void loop() {
   if (deviceConnected && millis() - lastPowerNotifyMs >= POWER_NOTIFY_PERIOD_MS) {
     lastPowerNotifyMs = millis();
     bleNotifyPower(currentPowerWatts, currentSpeedMph, currentRPM);
-    
+
     // Debug - show we're trying to notify
     static uint32_t notifyAttempts = 0;
     notifyAttempts++;
@@ -122,6 +123,9 @@ void loop() {
       Serial.printf("[MAIN] BLE notify attempts: %lu (Power=%.0fW)\n", notifyAttempts, currentPowerWatts);
     }
   }
+
+  // BLE keep-alive: periodically restart advertising to stay discoverable
+  bleKeepAlive();
 
   // NO delay() - let loop run as fast as possible
   yield();  // Just yield to WiFi stack

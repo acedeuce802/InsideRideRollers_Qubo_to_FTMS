@@ -10,7 +10,7 @@
 #include <Arduino.h>
 
 // ==================== VERSION ====================
-static const char* FW_VERSION = "2026-02_01_01";
+static const char* FW_VERSION = "2026-02_01_02";
 
 // ==================== ZWIFT SPOOFING ====================
 // CRITICAL: Zwift checks BOTH advertising name AND manufacturer

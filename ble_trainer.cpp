@@ -138,8 +138,10 @@ void bleInit() {
   Serial.println("  BLE Server created");
 
   // ===== Create Services First (before adding characteristics) =====
-  BLEService* pService = pServer->createService(BLEUUID((uint16_t)0x1826));  // FTMS
-  BLEService* pDis = pServer->createService(BLEUUID((uint16_t)0x180A));     // Device Info
+  // FTMS service needs more handles: 4 characteristics × 3 handles each + 1 service = 13
+  // Using 15 to be safe (default is often too small and causes crashes)
+  BLEService* pService = pServer->createService(BLEUUID((uint16_t)0x1826), 15);  // FTMS
+  BLEService* pDis = pServer->createService(BLEUUID((uint16_t)0x180A), 10);      // Device Info
 
   // ===== Device Information Service Characteristics =====
   BLECharacteristic* chMan = pDis->createCharacteristic(
@@ -201,8 +203,11 @@ void bleInit() {
   Serial.println("  FTMS Service configured");
 
   // Start FTMS service first
+  Serial.println("  Starting FTMS service...");
   pService->start();
-  
+  delay(100);  // Allow BLE stack to stabilize
+  Serial.println("  FTMS service started");
+
   // ===== Start Advertising =====
   BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->stop();
@@ -221,9 +226,12 @@ void bleInit() {
   pAdvertising->setMaxPreferred(0x12);
   
   pAdvertising->start();
-  
+  delay(50);  // Allow advertising to stabilize
+
   // Start Device Info Service AFTER advertising (matches working code)
+  Serial.println("  Starting Device Info service...");
   pDis->start();
+  delay(50);  // Allow service to stabilize
 
   Serial.println("✓ BLE Started (ESP32 BLE)");
   Serial.printf("  Device Name: %s\n", BLE_DEVICE_NAME);

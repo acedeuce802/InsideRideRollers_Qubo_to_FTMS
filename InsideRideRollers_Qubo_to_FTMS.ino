@@ -44,6 +44,7 @@ void setup() {
   stepperHome();       // Home stepper on power-up
   sensorsInit();       // Initialize Hall sensor
   bleInit();
+  delay(200);          // Allow BLE stack to fully stabilize before starting WiFi
   webServerInit();
 
   Serial.println("✓ System Ready");

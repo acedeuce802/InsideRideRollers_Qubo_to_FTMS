@@ -36,6 +36,12 @@ void stepperSetTarget(int32_t logicalTarget);
 void stepperHome();
 void stepperEnable(bool enable);
 
+// Safety functions
+void stepperRequestRehome(const char* reason);
+bool stepperLimitPressed();
+void stepperUpdateLimitDebounce();
+void stepperUpdateSpeedBasedEnable(float speedMph);
+
 // Conversion functions
 int32_t logicalToSteps(int32_t logical);
 int32_t stepsToLogical(int32_t steps);

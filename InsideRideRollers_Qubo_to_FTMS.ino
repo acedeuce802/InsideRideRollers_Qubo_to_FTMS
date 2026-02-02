@@ -19,6 +19,8 @@
 #include "web_server.h"
 #include "sensors.h"
 
+#include <esp_ota_ops.h>
+
 // ==================== CONTROL STATE ====================
 volatile int16_t ergTargetWatts = 0;        // ERG mode target power
 volatile float simGradePercent = 0.0f;      // SIM mode grade
@@ -27,10 +29,28 @@ static int32_t targetLogicalPosition = 0;   // Computed target position
 // ==================== TIMING ====================
 uint32_t lastPowerNotifyMs = 0;
 
+// ==================== OTA APP VALIDITY ====================
+static void otaMarkAppValidAfterBoot() {
+  // If rollback is enabled in the bootloader, new OTA images boot as "pending verify".
+  // Once we decide things look good, we mark valid to cancel rollback.
+  esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+  if (err == ESP_OK) {
+    Serial.println("[OTA] App marked VALID (rollback canceled if pending).");
+  } else if (err == ESP_ERR_OTA_ROLLBACK_INVALID_STATE) {
+    // Normal if rollback isn't enabled or app isn't in pending state.
+    Serial.println("[OTA] Rollback not pending (or not enabled).");
+  } else {
+    Serial.printf("[OTA] Mark valid failed: %d\n", (int)err);
+  }
+}
+
 // ==================== SETUP ====================
 void setup() {
   Serial.begin(115200);
   delay(100);
+
+  // Mark OTA app as valid to prevent rollback
+  otaMarkAppValidAfterBoot();
 
   Serial.println("=====================================");
   Serial.println("   InsideRide FTMS Smart Trainer    ");
@@ -72,6 +92,31 @@ void loop() {
     lastSensorUpdate = millis();
     sensorsUpdate();
   }
+
+  // ==================== SAFETY: LIMIT SWITCH MONITORING ====================
+  stepperUpdateLimitDebounce();
+
+  // Check if limit switch is pressed unexpectedly (not during homing)
+  if (!gIsHoming && stepperLimitPressed()) {
+    stepperRequestRehome("limitPressed in loop");
+  }
+
+  // Handle pending rehome request
+  if (gRehomeRequested && !gIsHoming) {
+    gRehomeRequested = false;
+
+    ControlMode prevMode = gMode;
+    gMode = MODE_IDLE;
+
+    stepperHome();
+
+    // Restore previous mode after successful rehome
+    gMode = prevMode;
+    Serial.println("[SAFETY] Rehome complete, resuming previous mode.");
+  }
+
+  // ==================== SPEED-BASED STEPPER ENABLE ====================
+  stepperUpdateSpeedBasedEnable(currentSpeedMph);
 
   // ==================== ERG/SIM MODE TARGET CALCULATION ====================
   // Update target position based on current mode (20 Hz)

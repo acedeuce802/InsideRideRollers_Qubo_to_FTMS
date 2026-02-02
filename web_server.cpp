@@ -433,24 +433,33 @@ static void handleUpdateForm() {
 
 static void handleUpdateUpload() {
   HTTPUpload& upload = server.upload();
-  
+
   if (upload.status == UPLOAD_FILE_START) {
     Serial.printf("[OTA] Starting: %s\n", upload.filename.c_str());
-    gOtaInProgress = true;
     gOtaBytes = 0;
     gOtaLastPct = 255;
-    
-    // Check if BLE connected (optional safety check)
+    gOtaDone = false;
+    gOtaOk = false;
+    gOtaErr = "";
+
+    // Check if BLE connected - deny OTA to prevent disruption
     if (OTA_DENY_WHEN_BLE_CONNECTED && deviceConnected) {
-      Serial.println("[OTA] DENIED - BLE connected");
-      Update.abort();
+      Serial.println("[OTA] DENIED - BLE connected (disconnect Zwift first)");
+      gOtaDone = true;
+      gOtaOk = false;
+      gOtaErr = "BLE connected - disconnect Zwift before updating firmware";
       gOtaInProgress = false;
       return;
     }
-    
+
+    gOtaInProgress = true;
+
     if (!Update.begin()) {
       Update.printError(Serial);
       gOtaInProgress = false;
+      gOtaDone = true;
+      gOtaOk = false;
+      gOtaErr = "Update.begin() failed";
     }
   }
   else if (upload.status == UPLOAD_FILE_WRITE) {
@@ -496,21 +505,27 @@ static void handleUpdatePostFinalizer() {
 </body>
 </html>
     )HTML");
-    
+
     delay(1000);
     Serial.println("[OTA] Rebooting...");
     ESP.restart();
   } else {
-    server.send(500, "text/html", R"HTML(
+    // Build error page with specific error message
+    String html = R"HTML(
 <!DOCTYPE html>
 <html>
 <head><title>Update Failed</title></head>
 <body>
   <h2>Update FAILED</h2>
+  <p style="color: red; font-weight: bold;">)HTML";
+    html += gOtaErr.length() > 0 ? gOtaErr : "Unknown error";
+    html += R"HTML(</p>
+  <p><a href="/">Return to main page</a></p>
   <p><a href="/update">Try again</a></p>
 </body>
 </html>
-    )HTML");
+    )HTML";
+    server.send(500, "text/html", html);
   }
 }
 

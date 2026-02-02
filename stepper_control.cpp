@@ -90,6 +90,9 @@ static inline bool limitPressed() {
   return gLimitStable == 0;
 }
 
+// Speed-based enable state
+static bool gSpeedBasedDisabled = false;
+
 static inline void stepperPulseOnce() {
   digitalWrite(STEP_PIN, HIGH);
   delayMicroseconds(2);
@@ -339,4 +342,58 @@ int32_t logicalToSteps(int32_t logical) {
 int32_t stepsToLogical(int32_t steps) {
   steps = constrain(steps, PHYS_MIN_STEPS, PHYS_MAX_STEPS);
   return (int32_t)((int64_t)steps * LOGICAL_MAX / PHYS_MAX_STEPS);
+}
+
+// ==================== SAFETY FUNCTIONS ====================
+
+void stepperUpdateLimitDebounce() {
+  updateLimitDebounce();
+}
+
+bool stepperLimitPressed() {
+  return limitPressed();
+}
+
+void stepperRequestRehome(const char* reason) {
+  uint32_t now = millis();
+  if (gIsHoming) return;
+  if (now - gLastLimitTripMs < REHOME_COOLDOWN_MS) return;
+
+  gLastLimitTripMs = now;
+  gRehomeRequested = true;
+
+  // Freeze motion immediately (prevents driving into the switch)
+  logStepTarget = logStepPos;
+
+  Serial.printf("[SAFETY] Limit hit -> rehome requested (%s)\n", reason);
+}
+
+void stepperUpdateSpeedBasedEnable(float speedMph) {
+  const uint32_t now = millis();
+
+  // Always force enable during homing or when rehome is pending
+  if (gIsHoming || gRehomeRequested) {
+    gBelowSpeedSinceMs = 0;
+    gSpeedBasedDisabled = false;
+    return;
+  }
+
+  // Check speed-based disable
+  if (speedMph < SPEED_DISABLE_MPH) {
+    if (gBelowSpeedSinceMs == 0) gBelowSpeedSinceMs = now;
+    if (now - gBelowSpeedSinceMs >= SPEED_HOLDOFF_MS) {
+      if (!gSpeedBasedDisabled) {
+        gSpeedBasedDisabled = true;
+        stepperEnable(false);
+        Serial.println("[STEP] Speed-based disable (below 2 mph)");
+      }
+    }
+  } else if (speedMph > SPEED_ENABLE_MPH) {
+    if (gSpeedBasedDisabled) {
+      gSpeedBasedDisabled = false;
+      stepperEnable(true);
+      Serial.println("[STEP] Speed-based enable (above 2.3 mph)");
+    }
+    gBelowSpeedSinceMs = 0;
+  }
 }

@@ -236,11 +236,11 @@ static void handleRoot() {
     </div>
 
     <div id="manual_warning" class="warning" style="display:none;">
-      ⚠️ Manual override active - Zwift control disabled
+      ⚠️ Manual override active - App control disabled
     </div>
 
-    <button class="btn-success btn-block" onclick="resumeZwift()">
-      ▶️ Resume Zwift Control
+    <button class="btn-success btn-block" onclick="resumeApp()">
+      ▶️ Resume App Control
     </button>
 
   </div>
@@ -250,9 +250,12 @@ static void handleRoot() {
     <p style="color: #888; font-size: 14px; margin: 5px 0;">Current version: )HTML";
   html += FW_VERSION;
   html += R"HTML(</p>
-    <form method="POST" action="/update" enctype="multipart/form-data">
-      <input type="file" name="update" accept=".bin" style="margin: 10px 0;">
-      <button type="submit" class="btn-primary btn-block">📤 Upload Firmware</button>
+    <div id="ota_blocked" class="warning" style="display:none;">
+      ⚠️ <strong>OTA Blocked:</strong> Disconnect App/BLE before updating firmware
+    </div>
+    <form method="POST" action="/update" enctype="multipart/form-data" id="ota_form">
+      <input type="file" name="update" accept=".bin" style="margin: 10px 0;" id="ota_file">
+      <button type="submit" class="btn-primary btn-block" id="ota_btn">📤 Upload Firmware</button>
     </form>
   </div>
 
@@ -275,8 +278,28 @@ static void handleRoot() {
             motorEl.textContent = 'DISABLED';
             motorEl.style.color = '#6c757d';
           }
-          document.getElementById('ble').textContent = d.ble ? 'Connected' : 'Disconnected';
-          
+          let bleEl = document.getElementById('ble');
+          bleEl.textContent = d.ble ? 'Connected' : 'Disconnected';
+          bleEl.style.color = d.ble ? '#28a745' : '#6c757d';
+
+          // Update OTA section based on BLE status
+          let otaBtn = document.getElementById('ota_btn');
+          let otaFile = document.getElementById('ota_file');
+          let otaBlocked = document.getElementById('ota_blocked');
+          if (d.ble) {
+            otaBtn.disabled = true;
+            otaBtn.style.opacity = '0.5';
+            otaBtn.style.cursor = 'not-allowed';
+            otaFile.disabled = true;
+            otaBlocked.style.display = 'block';
+          } else {
+            otaBtn.disabled = false;
+            otaBtn.style.opacity = '1';
+            otaBtn.style.cursor = 'pointer';
+            otaFile.disabled = false;
+            otaBlocked.style.display = 'none';
+          }
+
           // Update mode
           let modeText = d.mode;
           let modeClass = 'mode-idle';
@@ -324,8 +347,8 @@ static void handleRoot() {
         });
     }
 
-    function resumeZwift() {
-      fetch('/resume_zwift', {method: 'POST'})
+    function resumeApp() {
+      fetch('/resume_app', {method: 'POST'})
         .then(r => r.text())
         .then(msg => {
           console.log(msg);
@@ -409,9 +432,9 @@ static void handleGotoHold() {
   server.send(200, "text/plain", "Manual hold active at " + String(gManualHoldTarget));
 }
 
-static void handleResumeZwift() {
+static void handleResumeApp() {
   gManualHoldActive = false;
-  server.send(200, "text/plain", "Manual hold released - Zwift control resumed");
+  server.send(200, "text/plain", "Manual hold released - App control resumed");
 }
 
 static void handleUpdateForm() {
@@ -444,10 +467,10 @@ static void handleUpdateUpload() {
 
     // Check if BLE connected - deny OTA to prevent disruption
     if (OTA_DENY_WHEN_BLE_CONNECTED && deviceConnected) {
-      Serial.println("[OTA] DENIED - BLE connected (disconnect Zwift first)");
+      Serial.println("[OTA] DENIED - BLE connected (disconnect App first)");
       gOtaDone = true;
       gOtaOk = false;
-      gOtaErr = "BLE connected - disconnect Zwift before updating firmware";
+      gOtaErr = "BLE connected - disconnect App before updating firmware";
       gOtaInProgress = false;
       return;
     }
@@ -616,7 +639,7 @@ void webServerInit() {
   server.on("/goto", HTTP_GET, handleGoto);
   server.on("/enable", HTTP_GET, handleEnable);
   server.on("/goto_hold", HTTP_GET, handleGotoHold);
-  server.on("/resume_zwift", HTTP_POST, handleResumeZwift);
+  server.on("/resume_app", HTTP_POST, handleResumeApp);
   server.on("/update", HTTP_GET, handleUpdateForm);
   server.on("/update", HTTP_POST, handleUpdatePostFinalizer, handleUpdateUpload);
   

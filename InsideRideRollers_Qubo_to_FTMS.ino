@@ -18,6 +18,7 @@
 #include "led_control.h"
 #include "web_server.h"
 #include "sensors.h"
+#include "calibration.h"
 
 #include <esp_ota_ops.h>
 
@@ -60,6 +61,7 @@ void setup() {
 
   // Initialize subsystems
   ledInit();
+  calibrationInit();   // Load calibration from NVS
   stepperInit();
   stepperHome();       // Home stepper on power-up
   sensorsInit();       // Initialize Hall sensor
@@ -141,11 +143,8 @@ void loop() {
       
       case MODE_IDLE:
       default:
-        // IDLE mode: Use speed-based resistance curve
-        // y = -8.95 + 20.3x - 0.597x^2 + 0.0101x^3
-        double speed = constrain(currentSpeedMph, 0.0, 50.0);
-        double pos = -8.95 + 20.3 * speed - 0.597 * speed * speed + 0.0101 * speed * speed * speed;
-        targetLogicalPosition = constrain((int32_t)lround(pos), LOGICAL_MIN, LOGICAL_MAX);
+        // IDLE mode: Use speed-based resistance curve (calibratable)
+        targetLogicalPosition = idlePositionFromSpeed(currentSpeedMph);
         break;
     }
     

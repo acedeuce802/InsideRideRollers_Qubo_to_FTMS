@@ -10,7 +10,7 @@
 #include <Arduino.h>
 
 // ==================== VERSION ====================
-static const char* FW_VERSION = "2026-02_01_03";
+static const char* FW_VERSION = "2026-02_02_01";
 
 // ==================== ZWIFT SPOOFING ====================
 // CRITICAL: Zwift checks BOTH advertising name AND manufacturer
@@ -34,12 +34,19 @@ static const char* BLE_FIRMWARE_VERSION = "4.10.0";
 // static const char* BLE_MODEL = "Smart Trainer";
 
 // ==================== WIFI & WEB SERVER ====================
+// AP Mode (fallback / default)
 static const char* AP_SSID = "InsideRideCal";
 static const char* AP_PASS = "insideride"; // >= 8 chars
 
+// Client Mode (connect to home WiFi) - leave empty to disable
+// Set these to your home WiFi credentials for remote access
+static const char* WIFI_STA_SSID = "";  // e.g., "MyHomeWiFi"
+static const char* WIFI_STA_PASS = "";  // e.g., "mypassword"
+static const uint32_t WIFI_STA_TIMEOUT_MS = 10000; // Connection timeout before AP fallback
+
 // OTA Authentication
 static const char* OTA_USER = "admin";
-static const char* OTA_PASS = "change-me";
+static const char* OTA_PASS = "insiderideota";
 
 // OTA Settings
 static constexpr uint32_t OTA_UNLOCK_WINDOW_MS = 60 * 1000; // 60 seconds
@@ -86,5 +93,13 @@ static constexpr uint32_t POWER_NOTIFY_PERIOD_MS = 100;  // 10 Hz (matches origi
 // ==================== HALL SENSOR / RPM ====================
 static const uint8_t HALL_PULSES_PER_REV = 6;      // Number of magnets
 static constexpr float ROLLER_DIAMETER_IN = 3.25f;  // Roller diameter in inches
+
+// ==================== IDLE MODE SPEED CURVE ====================
+// Cubic polynomial: pos = a + b*speed + c*speed^2 + d*speed^3
+// Default coefficients for IDLE mode resistance curve
+static constexpr float IDLE_CURVE_DEFAULT_A = -8.95f;
+static constexpr float IDLE_CURVE_DEFAULT_B = 20.3f;
+static constexpr float IDLE_CURVE_DEFAULT_C = -0.597f;
+static constexpr float IDLE_CURVE_DEFAULT_D = 0.0101f;
 
 #endif // CONFIG_H

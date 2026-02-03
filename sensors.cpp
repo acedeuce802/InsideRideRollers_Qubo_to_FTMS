@@ -32,16 +32,17 @@ static constexpr float MINUTES_PER_HOUR = 60.0f;
 static constexpr float RPM_TO_MPH = (ROLLER_DIAMETER_IN * PI * MINUTES_PER_HOUR) / INCHES_PER_MILE;
 
 // ==================== POWER CALIBRATION DATA ====================
-// Speed grid (mph)
-static double X[] = { 0, 5, 10, 15, 20, 25, 50 };
-// Position grid (logical units)
-static double Y[] = { 0, 250, 500, 750, 1000 };
+// Speed grid (mph) - FIXED AXIS
+double gPowerSpeedAxis[7] = { 0, 5, 10, 15, 20, 25, 50 };
+// Position grid (logical units) - FIXED AXIS
+double gPowerPosAxis[5] = { 0, 250, 500, 750, 1000 };
 
-static const int Xcount = sizeof(X) / sizeof(X[0]);
-static const int Ycount = sizeof(Y) / sizeof(Y[0]);
+static const int Xcount = 7;
+static const int Ycount = 5;
 
 // Power calibration table [speed][position] = watts
-static double Z[7][5] = {
+// Default values - can be modified via web UI and saved to NVS
+double gPowerTable[7][5] = {
   {   0,   0,   0,   0,     0 },  // 0 mph
   {  52,  68,  80, 102,   124 },  // 5 mph
   { 117, 143, 217, 280,   343 },  // 10 mph
@@ -130,43 +131,43 @@ float mphToRpm(float mph) {
 
 double powerFromSpeedPos(double speedMph, double posLogical) {
   // Bounds check
-  if ((speedMph < X[0]) || (speedMph > X[Xcount - 1])) {
+  if ((speedMph < gPowerSpeedAxis[0]) || (speedMph > gPowerSpeedAxis[Xcount - 1])) {
     Serial.println("[POWER] Speed out of range");
     return 0;
   }
-  
-  if ((posLogical < Y[0]) || (posLogical > Y[Ycount - 1])) {
+
+  if ((posLogical < gPowerPosAxis[0]) || (posLogical > gPowerPosAxis[Ycount - 1])) {
     Serial.println("[POWER] Position out of range");
     return 0;
   }
-  
+
   // Find grid indices
   int xIndex = 0, yIndex = 0;
-  
+
   for (int i = Xcount - 2; i >= 0; --i) {
-    if (speedMph >= X[i]) {
+    if (speedMph >= gPowerSpeedAxis[i]) {
       xIndex = i;
       break;
     }
   }
-  
+
   for (int i = Ycount - 2; i >= 0; --i) {
-    if (posLogical >= Y[i]) {
+    if (posLogical >= gPowerPosAxis[i]) {
       yIndex = i;
       break;
     }
   }
-  
+
   // Bilinear interpolation
-  double x1 = X[xIndex];
-  double x2 = X[xIndex + 1];
-  double y1 = Y[yIndex];
-  double y2 = Y[yIndex + 1];
+  double x1 = gPowerSpeedAxis[xIndex];
+  double x2 = gPowerSpeedAxis[xIndex + 1];
+  double y1 = gPowerPosAxis[yIndex];
+  double y2 = gPowerPosAxis[yIndex + 1];
   
-  double fQ11 = Z[xIndex][yIndex];
-  double fQ12 = Z[xIndex][yIndex + 1];
-  double fQ21 = Z[xIndex + 1][yIndex];
-  double fQ22 = Z[xIndex + 1][yIndex + 1];
+  double fQ11 = gPowerTable[xIndex][yIndex];
+  double fQ12 = gPowerTable[xIndex][yIndex + 1];
+  double fQ21 = gPowerTable[xIndex + 1][yIndex];
+  double fQ22 = gPowerTable[xIndex + 1][yIndex + 1];
   
   // Interpolate in x direction
   double fxy1 = ((x2 - speedMph) / (x2 - x1)) * fQ11 + ((speedMph - x1) / (x2 - x1)) * fQ21;
@@ -180,16 +181,17 @@ double powerFromSpeedPos(double speedMph, double posLogical) {
 
 // ==================== ERG MODE: STEP FROM POWER/SPEED ====================
 
-// ERG mode calibration: Speed grid (mph)
-static double Xw[] = { 0, 5, 10, 15, 20, 25, 50 };
-// ERG mode calibration: Power grid (watts)
-static double Yw[] = { 0, 100, 150, 200, 250, 300, 400, 600, 1000 };
+// ERG mode calibration: Speed grid (mph) - FIXED AXIS
+double gErgSpeedAxis[7] = { 0, 5, 10, 15, 20, 25, 50 };
+// ERG mode calibration: Power grid (watts) - FIXED AXIS
+double gErgPowerAxis[9] = { 0, 100, 150, 200, 250, 300, 400, 600, 1000 };
 
-static const int Xcountw = sizeof(Xw) / sizeof(Xw[0]);
-static const int Ycountw = sizeof(Yw) / sizeof(Yw[0]);
+static const int Xcountw = 7;
+static const int Ycountw = 9;
 
 // ERG mode table: [speed][power] = position
-static double Zw[7][9] = {
+// Default values - can be modified via web UI and saved to NVS
+double gErgTable[7][9] = {
   {   0,    0,    0,    0,    0,    0,    0,    0,    0 },  // 0 mph
   {   0,  739, 1000, 1000, 1000, 1000, 1000, 1000, 1000 },  // 5 mph
   {   0,    0,  212,  442,  651,  841, 1000, 1000, 1000 },  // 10 mph
@@ -201,43 +203,43 @@ static double Zw[7][9] = {
 
 double stepFromPowerSpeed(double speedMph, double targetWatts) {
   // Bounds check
-  if ((speedMph < Xw[0]) || (speedMph > Xw[Xcountw - 1])) {
+  if ((speedMph < gErgSpeedAxis[0]) || (speedMph > gErgSpeedAxis[Xcountw - 1])) {
     Serial.println("[ERG] Speed out of range");
     return 0;
   }
-  
-  if ((targetWatts < Yw[0]) || (targetWatts > Yw[Ycountw - 1])) {
+
+  if ((targetWatts < gErgPowerAxis[0]) || (targetWatts > gErgPowerAxis[Ycountw - 1])) {
     Serial.println("[ERG] Power out of range");
     return 0;
   }
-  
+
   // Find grid indices
   int xIndex = 0, yIndex = 0;
-  
+
   for (int i = Xcountw - 2; i >= 0; --i) {
-    if (speedMph >= Xw[i]) {
+    if (speedMph >= gErgSpeedAxis[i]) {
       xIndex = i;
       break;
     }
   }
-  
+
   for (int i = Ycountw - 2; i >= 0; --i) {
-    if (targetWatts >= Yw[i]) {
+    if (targetWatts >= gErgPowerAxis[i]) {
       yIndex = i;
       break;
     }
   }
-  
+
   // Bilinear interpolation
-  double x1 = Xw[xIndex];
-  double x2 = Xw[xIndex + 1];
-  double y1 = Yw[yIndex];
-  double y2 = Yw[yIndex + 1];
-  
-  double fQ11 = Zw[xIndex][yIndex];
-  double fQ12 = Zw[xIndex][yIndex + 1];
-  double fQ21 = Zw[xIndex + 1][yIndex];
-  double fQ22 = Zw[xIndex + 1][yIndex + 1];
+  double x1 = gErgSpeedAxis[xIndex];
+  double x2 = gErgSpeedAxis[xIndex + 1];
+  double y1 = gErgPowerAxis[yIndex];
+  double y2 = gErgPowerAxis[yIndex + 1];
+
+  double fQ11 = gErgTable[xIndex][yIndex];
+  double fQ12 = gErgTable[xIndex][yIndex + 1];
+  double fQ21 = gErgTable[xIndex + 1][yIndex];
+  double fQ22 = gErgTable[xIndex + 1][yIndex + 1];
   
   double fxy1 = ((x2 - speedMph) / (x2 - x1)) * fQ11 + ((speedMph - x1) / (x2 - x1)) * fQ21;
   double fxy2 = ((x2 - speedMph) / (x2 - x1)) * fQ12 + ((speedMph - x1) / (x2 - x1)) * fQ22;
@@ -249,16 +251,17 @@ double stepFromPowerSpeed(double speedMph, double targetWatts) {
 
 // ==================== SIM MODE: STEP FROM GRADE/SPEED ====================
 
-// SIM mode calibration: Speed grid (mph)
-static double Xstep[] = { 0, 5, 10, 15, 20, 25, 30, 50 };
-// SIM mode calibration: Grade grid (percent)
-static double Ystep[] = { -4, 0, 2, 4, 6, 8, 10 };
+// SIM mode calibration: Speed grid (mph) - FIXED AXIS
+double gSimSpeedAxis[8] = { 0, 5, 10, 15, 20, 25, 30, 50 };
+// SIM mode calibration: Grade grid (percent) - FIXED AXIS
+double gSimGradeAxis[7] = { -4, 0, 2, 4, 6, 8, 10 };
 
-static const int Xcountstep = sizeof(Xstep) / sizeof(Xstep[0]);
-static const int Ycountstep = sizeof(Ystep) / sizeof(Ystep[0]);
+static const int Xcountstep = 8;
+static const int Ycountstep = 7;
 
 // SIM mode table: [speed][grade] = position
-static double Zstep[8][7] = {
+// Default values - can be modified via web UI and saved to NVS
+double gSimTable[8][7] = {
   {   0,  167,  333,  500,  667,  833, 1000 },  // 0 mph
   {   0,  167,  333,  500,  667,  833, 1000 },  // 5 mph
   {   0,  167,  333,  500,  667,  833, 1000 },  // 10 mph
@@ -271,44 +274,44 @@ static double Zstep[8][7] = {
 
 double gradeToSteps(double speedMph, double gradePercent) {
   // Bounds check
-  if ((speedMph < Xstep[0]) || (speedMph > Xstep[Xcountstep - 1])) {
+  if ((speedMph < gSimSpeedAxis[0]) || (speedMph > gSimSpeedAxis[Xcountstep - 1])) {
     Serial.println("[SIM] Speed out of range");
     return 500;  // Default to mid position
   }
-  
-  if ((gradePercent < Ystep[0]) || (gradePercent > Ystep[Ycountstep - 1])) {
+
+  if ((gradePercent < gSimGradeAxis[0]) || (gradePercent > gSimGradeAxis[Ycountstep - 1])) {
     Serial.println("[SIM] Grade out of range");
     // Clamp instead of returning 0
-    gradePercent = constrain(gradePercent, Ystep[0], Ystep[Ycountstep - 1]);
+    gradePercent = constrain(gradePercent, gSimGradeAxis[0], gSimGradeAxis[Ycountstep - 1]);
   }
-  
+
   // Find grid indices
   int xIndex = 0, yIndex = 0;
-  
+
   for (int i = Xcountstep - 2; i >= 0; --i) {
-    if (speedMph >= Xstep[i]) {
+    if (speedMph >= gSimSpeedAxis[i]) {
       xIndex = i;
       break;
     }
   }
-  
+
   for (int i = Ycountstep - 2; i >= 0; --i) {
-    if (gradePercent >= Ystep[i]) {
+    if (gradePercent >= gSimGradeAxis[i]) {
       yIndex = i;
       break;
     }
   }
-  
+
   // Bilinear interpolation
-  double x1 = Xstep[xIndex];
-  double x2 = Xstep[xIndex + 1];
-  double y1 = Ystep[yIndex];
-  double y2 = Ystep[yIndex + 1];
-  
-  double fQ11 = Zstep[xIndex][yIndex];
-  double fQ12 = Zstep[xIndex][yIndex + 1];
-  double fQ21 = Zstep[xIndex + 1][yIndex];
-  double fQ22 = Zstep[xIndex + 1][yIndex + 1];
+  double x1 = gSimSpeedAxis[xIndex];
+  double x2 = gSimSpeedAxis[xIndex + 1];
+  double y1 = gSimGradeAxis[yIndex];
+  double y2 = gSimGradeAxis[yIndex + 1];
+
+  double fQ11 = gSimTable[xIndex][yIndex];
+  double fQ12 = gSimTable[xIndex][yIndex + 1];
+  double fQ21 = gSimTable[xIndex + 1][yIndex];
+  double fQ22 = gSimTable[xIndex + 1][yIndex + 1];
   
   double fxy1 = ((x2 - speedMph) / (x2 - x1)) * fQ11 + ((speedMph - x1) / (x2 - x1)) * fQ21;
   double fxy2 = ((x2 - speedMph) / (x2 - x1)) * fQ12 + ((speedMph - x1) / (x2 - x1)) * fQ22;

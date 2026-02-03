@@ -314,34 +314,16 @@ static void handleRoot() {
   </div>
 
   <div class="container">
-    <h2>⚙️ IDLE Curve Calibration</h2>
-    <p style="color: #888; font-size: 14px; margin: 5px 0;">
-      Adjust the speed-to-position curve: pos = a + b×speed + c×speed² + d×speed³
-    </p>
+    <h2>⚙️ Calibration</h2>
     <div class="control-group">
-      <div class="status-grid" style="grid-template-columns: 1fr 1fr;">
-        <div class="input-group" style="flex-direction: column; align-items: stretch;">
-          <label for="cal_a"><strong>a (constant):</strong></label>
-          <input type="number" id="cal_a" step="0.01" style="width: 100%;" />
-        </div>
-        <div class="input-group" style="flex-direction: column; align-items: stretch;">
-          <label for="cal_b"><strong>b (linear):</strong></label>
-          <input type="number" id="cal_b" step="0.01" style="width: 100%;" />
-        </div>
-        <div class="input-group" style="flex-direction: column; align-items: stretch;">
-          <label for="cal_c"><strong>c (quadratic):</strong></label>
-          <input type="number" id="cal_c" step="0.001" style="width: 100%;" />
-        </div>
-        <div class="input-group" style="flex-direction: column; align-items: stretch;">
-          <label for="cal_d"><strong>d (cubic):</strong></label>
-          <input type="number" id="cal_d" step="0.0001" style="width: 100%;" />
-        </div>
-      </div>
-      <div style="display: flex; gap: 10px; margin-top: 10px;">
-        <button class="btn-primary" onclick="saveCalibration()">💾 Save</button>
-        <button class="btn-warning" onclick="resetCalibration()">↩️ Reset to Defaults</button>
-      </div>
-      <div id="cal_status" style="margin-top: 10px; display: none; padding: 8px; border-radius: 4px;"></div>
+      <p style="margin: 0 0 15px 0;">
+        <a href="/tables" style="display: inline-block; padding: 12px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">
+          📊 Edit Calibration Tables (Power, ERG, SIM, IDLE)
+        </a>
+      </p>
+      <p style="color: #888; font-size: 13px; margin: 0;">
+        Configure the lookup tables used for power estimation, ERG mode, SIM mode, and IDLE curve.
+      </p>
     </div>
   </div>
 
@@ -436,47 +418,6 @@ static void handleRoot() {
         });
     }
 
-    function loadCalibration() {
-      fetch('/calibration.json')
-        .then(r => r.json())
-        .then(d => {
-          document.getElementById('cal_a').value = d.a;
-          document.getElementById('cal_b').value = d.b;
-          document.getElementById('cal_c').value = d.c;
-          document.getElementById('cal_d').value = d.d;
-        });
-    }
-
-    function saveCalibration() {
-      let a = document.getElementById('cal_a').value;
-      let b = document.getElementById('cal_b').value;
-      let c = document.getElementById('cal_c').value;
-      let d = document.getElementById('cal_d').value;
-      fetch('/calibration?a=' + a + '&b=' + b + '&c=' + c + '&d=' + d, {method: 'POST'})
-        .then(r => r.text())
-        .then(msg => {
-          showCalStatus(msg, true);
-        })
-        .catch(e => showCalStatus('Error: ' + e, false));
-    }
-
-    function resetCalibration() {
-      fetch('/calibration/reset', {method: 'POST'})
-        .then(r => r.text())
-        .then(msg => {
-          showCalStatus(msg, true);
-          loadCalibration();
-        });
-    }
-
-    function showCalStatus(msg, success) {
-      let el = document.getElementById('cal_status');
-      el.textContent = msg;
-      el.style.display = 'block';
-      el.style.background = success ? '#d4edda' : '#f8d7da';
-      el.style.color = success ? '#155724' : '#721c24';
-      setTimeout(() => { el.style.display = 'none'; }, 3000);
-    }
 
     // ==================== WEBSOCKET WITH FALLBACK ====================
     let ws = null;
@@ -671,7 +612,6 @@ static void handleRoot() {
     // Start with WebSocket, fallback to polling
     connectWebSocket();
     updateDiag(); // Initial fetch
-    loadCalibration();
     loadOtaInfo();
     loadWifiStatus();
   </script>
@@ -780,6 +720,505 @@ static void handleCalibrationSet() {
 static void handleCalibrationReset() {
   calibrationReset();
   server.send(200, "text/plain", "Calibration reset to defaults");
+}
+
+// ==================== CALIBRATION TABLES PAGE ====================
+
+static void handleTablesPage() {
+  String html = R"HTML(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Calibration Tables</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 1200px; margin: 20px auto; padding: 20px; background: #f0f0f0; }
+    .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
+    h1 { color: #333; margin-top: 0; }
+    h2 { color: #666; border-bottom: 2px solid #007bff; padding-bottom: 5px; }
+    table { border-collapse: collapse; margin: 10px 0; font-size: 14px; }
+    th, td { border: 1px solid #ddd; padding: 4px 8px; text-align: center; }
+    th { background: #007bff; color: white; }
+    .row-header { background: #e7f3ff; font-weight: bold; }
+    input[type="number"] { width: 60px; padding: 2px; text-align: center; border: 1px solid #ccc; border-radius: 3px; }
+    input[type="number"]:focus { outline: 2px solid #007bff; }
+    button { padding: 10px 20px; font-size: 14px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
+    .btn-primary { background: #007bff; color: white; }
+    .btn-primary:hover { background: #0056b3; }
+    .btn-warning { background: #ffc107; color: black; }
+    .btn-warning:hover { background: #e0a800; }
+    .btn-secondary { background: #6c757d; color: white; }
+    .btn-secondary:hover { background: #545b62; }
+    .status { margin: 10px 0; padding: 10px; border-radius: 4px; display: none; }
+    .status.success { background: #d4edda; color: #155724; display: block; }
+    .status.error { background: #f8d7da; color: #721c24; display: block; }
+    .axis-label { background: #f8f9fa; font-weight: bold; font-size: 12px; }
+    .table-wrapper { overflow-x: auto; }
+    a { color: #007bff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📊 Calibration Tables</h1>
+    <p><a href="/">← Back to Main Page</a></p>
+  </div>
+
+  <div class="container">
+    <h2>Power Table (Speed × Position → Watts)</h2>
+    <p style="color: #666; font-size: 13px;">Used for estimating power output based on roller speed and resistance position.</p>
+    <div class="table-wrapper">
+      <table id="powerTable"></table>
+    </div>
+    <div>
+      <button class="btn-primary" onclick="savePowerTable()">💾 Save Power Table</button>
+      <button class="btn-warning" onclick="resetPowerTable()">↩️ Reset to Defaults</button>
+    </div>
+    <div id="powerStatus" class="status"></div>
+  </div>
+
+  <div class="container">
+    <h2>ERG Table (Speed × Target Power → Position)</h2>
+    <p style="color: #666; font-size: 13px;">Used in ERG mode to determine resistance position from target power and current speed. Values clamped to 0-1000.</p>
+    <div class="table-wrapper">
+      <table id="ergTable"></table>
+    </div>
+    <div>
+      <button class="btn-primary" onclick="saveErgTable()">💾 Save ERG Table</button>
+      <button class="btn-warning" onclick="resetErgTable()">↩️ Reset to Defaults</button>
+    </div>
+    <div id="ergStatus" class="status"></div>
+  </div>
+
+  <div class="container">
+    <h2>SIM Table (Speed × Grade → Position)</h2>
+    <p style="color: #666; font-size: 13px;">Used in SIM mode to determine resistance position from grade percentage and current speed. Values clamped to 0-1000.</p>
+    <div class="table-wrapper">
+      <table id="simTable"></table>
+    </div>
+    <div>
+      <button class="btn-primary" onclick="saveSimTable()">💾 Save SIM Table</button>
+      <button class="btn-warning" onclick="resetSimTable()">↩️ Reset to Defaults</button>
+    </div>
+    <div id="simStatus" class="status"></div>
+  </div>
+
+  <div class="container">
+    <h2>IDLE Curve Coefficients</h2>
+    <p style="color: #666; font-size: 13px;">Fallback curve when no app is connected: pos = a + b×speed + c×speed² + d×speed³</p>
+    <div class="table-wrapper">
+      <table>
+        <tr>
+          <th>a (constant)</th>
+          <th>b (linear)</th>
+          <th>c (quadratic)</th>
+          <th>d (cubic)</th>
+        </tr>
+        <tr>
+          <td><input type="number" id="idle_a" step="0.01"></td>
+          <td><input type="number" id="idle_b" step="0.01"></td>
+          <td><input type="number" id="idle_c" step="0.001"></td>
+          <td><input type="number" id="idle_d" step="0.0001"></td>
+        </tr>
+      </table>
+    </div>
+    <div>
+      <button class="btn-primary" onclick="saveIdleCurve()">💾 Save IDLE Curve</button>
+      <button class="btn-warning" onclick="resetIdleCurve()">↩️ Reset to Defaults</button>
+    </div>
+    <div id="idleStatus" class="status"></div>
+  </div>
+
+  <script>
+    // Build table HTML with editable inputs
+    function buildTable(tableId, data) {
+      let tbl = document.getElementById(tableId);
+      let html = '<tr><th></th>';
+      // Column headers (Y axis)
+      for (let j = 0; j < data.yAxis.length; j++) {
+        html += '<th>' + data.yAxisLabel + '<br>' + data.yAxis[j] + '</th>';
+      }
+      html += '</tr>';
+      // Data rows
+      for (let i = 0; i < data.xAxis.length; i++) {
+        html += '<tr><td class="row-header">' + data.xAxisLabel + '<br>' + data.xAxis[i] + '</td>';
+        for (let j = 0; j < data.yAxis.length; j++) {
+          let val = data.values[i][j];
+          html += '<td><input type="number" id="' + tableId + '_' + i + '_' + j + '" value="' + val + '" step="1"></td>';
+        }
+        html += '</tr>';
+      }
+      tbl.innerHTML = html;
+    }
+
+    // Collect table values into 2D array
+    function collectTable(tableId, rows, cols) {
+      let values = [];
+      for (let i = 0; i < rows; i++) {
+        let row = [];
+        for (let j = 0; j < cols; j++) {
+          let el = document.getElementById(tableId + '_' + i + '_' + j);
+          row.push(parseFloat(el.value) || 0);
+        }
+        values.push(row);
+      }
+      return values;
+    }
+
+    function showStatus(id, msg, success) {
+      let el = document.getElementById(id);
+      el.textContent = msg;
+      el.className = 'status ' + (success ? 'success' : 'error');
+      setTimeout(() => { el.className = 'status'; }, 3000);
+    }
+
+    // Load all tables
+    function loadTables() {
+      fetch('/tables.json')
+        .then(r => r.json())
+        .then(d => {
+          buildTable('powerTable', {
+            xAxis: d.power.speedAxis,
+            yAxis: d.power.posAxis,
+            xAxisLabel: 'Speed (mph)',
+            yAxisLabel: 'Pos',
+            values: d.power.values
+          });
+          buildTable('ergTable', {
+            xAxis: d.erg.speedAxis,
+            yAxis: d.erg.powerAxis,
+            xAxisLabel: 'Speed (mph)',
+            yAxisLabel: 'Power (W)',
+            values: d.erg.values
+          });
+          buildTable('simTable', {
+            xAxis: d.sim.speedAxis,
+            yAxis: d.sim.gradeAxis,
+            xAxisLabel: 'Speed (mph)',
+            yAxisLabel: 'Grade (%)',
+            values: d.sim.values
+          });
+          // Load IDLE curve coefficients
+          if (d.idle) {
+            document.getElementById('idle_a').value = d.idle.a;
+            document.getElementById('idle_b').value = d.idle.b;
+            document.getElementById('idle_c').value = d.idle.c;
+            document.getElementById('idle_d').value = d.idle.d;
+          }
+        })
+        .catch(e => console.error('Failed to load tables:', e));
+    }
+
+    // Save functions
+    function savePowerTable() {
+      let values = collectTable('powerTable', 7, 5);
+      fetch('/tables/power', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({values: values})
+      })
+      .then(r => r.text())
+      .then(msg => showStatus('powerStatus', msg, true))
+      .catch(e => showStatus('powerStatus', 'Save failed: ' + e, false));
+    }
+
+    function resetPowerTable() {
+      if (!confirm('Reset Power table to defaults?')) return;
+      fetch('/tables/power/reset', {method: 'POST'})
+        .then(r => r.text())
+        .then(msg => { showStatus('powerStatus', msg, true); loadTables(); })
+        .catch(e => showStatus('powerStatus', 'Reset failed: ' + e, false));
+    }
+
+    function saveErgTable() {
+      let values = collectTable('ergTable', 7, 9);
+      fetch('/tables/erg', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({values: values})
+      })
+      .then(r => r.text())
+      .then(msg => showStatus('ergStatus', msg, true))
+      .catch(e => showStatus('ergStatus', 'Save failed: ' + e, false));
+    }
+
+    function resetErgTable() {
+      if (!confirm('Reset ERG table to defaults?')) return;
+      fetch('/tables/erg/reset', {method: 'POST'})
+        .then(r => r.text())
+        .then(msg => { showStatus('ergStatus', msg, true); loadTables(); })
+        .catch(e => showStatus('ergStatus', 'Reset failed: ' + e, false));
+    }
+
+    function saveSimTable() {
+      let values = collectTable('simTable', 8, 7);
+      fetch('/tables/sim', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({values: values})
+      })
+      .then(r => r.text())
+      .then(msg => showStatus('simStatus', msg, true))
+      .catch(e => showStatus('simStatus', 'Save failed: ' + e, false));
+    }
+
+    function resetSimTable() {
+      if (!confirm('Reset SIM table to defaults?')) return;
+      fetch('/tables/sim/reset', {method: 'POST'})
+        .then(r => r.text())
+        .then(msg => { showStatus('simStatus', msg, true); loadTables(); })
+        .catch(e => showStatus('simStatus', 'Reset failed: ' + e, false));
+    }
+
+    function saveIdleCurve() {
+      let a = document.getElementById('idle_a').value;
+      let b = document.getElementById('idle_b').value;
+      let c = document.getElementById('idle_c').value;
+      let d = document.getElementById('idle_d').value;
+      fetch('/calibration?a=' + a + '&b=' + b + '&c=' + c + '&d=' + d, {method: 'POST'})
+        .then(r => r.text())
+        .then(msg => showStatus('idleStatus', msg, true))
+        .catch(e => showStatus('idleStatus', 'Save failed: ' + e, false));
+    }
+
+    function resetIdleCurve() {
+      if (!confirm('Reset IDLE curve to defaults?')) return;
+      fetch('/calibration/reset', {method: 'POST'})
+        .then(r => r.text())
+        .then(msg => { showStatus('idleStatus', msg, true); loadTables(); })
+        .catch(e => showStatus('idleStatus', 'Reset failed: ' + e, false));
+    }
+
+    // Load on page load
+    loadTables();
+  </script>
+</body>
+</html>
+  )HTML";
+
+  server.send(200, "text/html", html);
+}
+
+// JSON endpoint for all calibration tables
+static void handleTablesJson() {
+  String json = "{";
+
+  // Power table
+  json += "\"power\":{";
+  json += "\"speedAxis\":[";
+  for (int i = 0; i < POWER_TABLE_ROWS; i++) {
+    if (i > 0) json += ",";
+    json += String(powerSpeedAxis(i), 0);
+  }
+  json += "],\"posAxis\":[";
+  for (int i = 0; i < POWER_TABLE_COLS; i++) {
+    if (i > 0) json += ",";
+    json += String(powerPosAxis(i), 0);
+  }
+  json += "],\"values\":[";
+  for (int i = 0; i < POWER_TABLE_ROWS; i++) {
+    if (i > 0) json += ",";
+    json += "[";
+    for (int j = 0; j < POWER_TABLE_COLS; j++) {
+      if (j > 0) json += ",";
+      json += String(powerTableGet(i, j), 0);
+    }
+    json += "]";
+  }
+  json += "]},";
+
+  // ERG table
+  json += "\"erg\":{";
+  json += "\"speedAxis\":[";
+  for (int i = 0; i < ERG_TABLE_ROWS; i++) {
+    if (i > 0) json += ",";
+    json += String(ergSpeedAxis(i), 0);
+  }
+  json += "],\"powerAxis\":[";
+  for (int i = 0; i < ERG_TABLE_COLS; i++) {
+    if (i > 0) json += ",";
+    json += String(ergPowerAxis(i), 0);
+  }
+  json += "],\"values\":[";
+  for (int i = 0; i < ERG_TABLE_ROWS; i++) {
+    if (i > 0) json += ",";
+    json += "[";
+    for (int j = 0; j < ERG_TABLE_COLS; j++) {
+      if (j > 0) json += ",";
+      json += String(ergTableGet(i, j), 0);
+    }
+    json += "]";
+  }
+  json += "]},";
+
+  // SIM table
+  json += "\"sim\":{";
+  json += "\"speedAxis\":[";
+  for (int i = 0; i < SIM_TABLE_ROWS; i++) {
+    if (i > 0) json += ",";
+    json += String(simSpeedAxis(i), 0);
+  }
+  json += "],\"gradeAxis\":[";
+  for (int i = 0; i < SIM_TABLE_COLS; i++) {
+    if (i > 0) json += ",";
+    json += String(simGradeAxis(i), 0);
+  }
+  json += "],\"values\":[";
+  for (int i = 0; i < SIM_TABLE_ROWS; i++) {
+    if (i > 0) json += ",";
+    json += "[";
+    for (int j = 0; j < SIM_TABLE_COLS; j++) {
+      if (j > 0) json += ",";
+      json += String(simTableGet(i, j), 0);
+    }
+    json += "]";
+  }
+  json += "]},";
+
+  // IDLE curve coefficients
+  json += "\"idle\":{";
+  json += "\"a\":" + String(gIdleCurveA, 4) + ",";
+  json += "\"b\":" + String(gIdleCurveB, 4) + ",";
+  json += "\"c\":" + String(gIdleCurveC, 5) + ",";
+  json += "\"d\":" + String(gIdleCurveD, 6);
+  json += "}";
+
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+// Simple JSON parser for table values
+static bool parseTableValues(const String& body, double* values, int rows, int cols) {
+  // Find "values":[[...]]
+  int start = body.indexOf("\"values\"");
+  if (start < 0) return false;
+
+  start = body.indexOf("[[", start);
+  if (start < 0) return false;
+
+  int idx = 0;
+  int pos = start + 2;
+  for (int i = 0; i < rows && pos < body.length(); i++) {
+    for (int j = 0; j < cols && pos < body.length(); j++) {
+      // Skip whitespace and commas
+      while (pos < body.length() && (body[pos] == ' ' || body[pos] == ',' || body[pos] == '[')) pos++;
+
+      // Parse number
+      int numStart = pos;
+      while (pos < body.length() && (isdigit(body[pos]) || body[pos] == '-' || body[pos] == '.')) pos++;
+
+      if (pos > numStart) {
+        values[idx++] = body.substring(numStart, pos).toDouble();
+      }
+
+      // Skip to next number or end of row
+      while (pos < body.length() && body[pos] != ',' && body[pos] != ']') pos++;
+    }
+    // Skip to next row
+    while (pos < body.length() && body[pos] != '[' && body[pos] != ']') pos++;
+    if (body[pos] == ']') pos++;  // End of row
+  }
+
+  return idx == rows * cols;
+}
+
+static void handlePowerTableSave() {
+  if (server.method() != HTTP_POST) {
+    server.send(405, "text/plain", "Method not allowed");
+    return;
+  }
+
+  String body = server.arg("plain");
+  double values[POWER_TABLE_ROWS * POWER_TABLE_COLS];
+
+  if (!parseTableValues(body, values, POWER_TABLE_ROWS, POWER_TABLE_COLS)) {
+    server.send(400, "text/plain", "Invalid table data");
+    return;
+  }
+
+  int idx = 0;
+  for (int i = 0; i < POWER_TABLE_ROWS; i++) {
+    for (int j = 0; j < POWER_TABLE_COLS; j++) {
+      powerTableSet(i, j, values[idx++]);
+    }
+  }
+  powerTableSave();
+
+  server.send(200, "text/plain", "Power table saved");
+}
+
+static void handlePowerTableReset() {
+  powerTableReset();
+  server.send(200, "text/plain", "Power table reset to defaults");
+}
+
+static void handleErgTableSave() {
+  if (server.method() != HTTP_POST) {
+    server.send(405, "text/plain", "Method not allowed");
+    return;
+  }
+
+  String body = server.arg("plain");
+  double values[ERG_TABLE_ROWS * ERG_TABLE_COLS];
+
+  if (!parseTableValues(body, values, ERG_TABLE_ROWS, ERG_TABLE_COLS)) {
+    server.send(400, "text/plain", "Invalid table data");
+    return;
+  }
+
+  int idx = 0;
+  for (int i = 0; i < ERG_TABLE_ROWS; i++) {
+    for (int j = 0; j < ERG_TABLE_COLS; j++) {
+      // Clamp ERG table values to 0-1000 (position range)
+      double val = values[idx++];
+      if (val < 0) val = 0;
+      if (val > 1000) val = 1000;
+      ergTableSet(i, j, val);
+    }
+  }
+  ergTableSave();
+
+  server.send(200, "text/plain", "ERG table saved (values clamped to 0-1000)");
+}
+
+static void handleErgTableReset() {
+  ergTableReset();
+  server.send(200, "text/plain", "ERG table reset to defaults");
+}
+
+static void handleSimTableSave() {
+  if (server.method() != HTTP_POST) {
+    server.send(405, "text/plain", "Method not allowed");
+    return;
+  }
+
+  String body = server.arg("plain");
+  double values[SIM_TABLE_ROWS * SIM_TABLE_COLS];
+
+  if (!parseTableValues(body, values, SIM_TABLE_ROWS, SIM_TABLE_COLS)) {
+    server.send(400, "text/plain", "Invalid table data");
+    return;
+  }
+
+  int idx = 0;
+  for (int i = 0; i < SIM_TABLE_ROWS; i++) {
+    for (int j = 0; j < SIM_TABLE_COLS; j++) {
+      // Clamp SIM table values to 0-1000 (position range)
+      double val = values[idx++];
+      if (val < 0) val = 0;
+      if (val > 1000) val = 1000;
+      simTableSet(i, j, val);
+    }
+  }
+  simTableSave();
+
+  server.send(200, "text/plain", "SIM table saved (values clamped to 0-1000)");
+}
+
+static void handleSimTableReset() {
+  simTableReset();
+  server.send(200, "text/plain", "SIM table reset to defaults");
 }
 
 // ==================== WIFI SETTINGS HANDLERS ====================
@@ -1178,6 +1617,14 @@ void webServerInit() {
   server.on("/calibration.json", HTTP_GET, handleCalibrationJson);
   server.on("/calibration", HTTP_POST, handleCalibrationSet);
   server.on("/calibration/reset", HTTP_POST, handleCalibrationReset);
+  server.on("/tables", HTTP_GET, handleTablesPage);
+  server.on("/tables.json", HTTP_GET, handleTablesJson);
+  server.on("/tables/power", HTTP_POST, handlePowerTableSave);
+  server.on("/tables/power/reset", HTTP_POST, handlePowerTableReset);
+  server.on("/tables/erg", HTTP_POST, handleErgTableSave);
+  server.on("/tables/erg/reset", HTTP_POST, handleErgTableReset);
+  server.on("/tables/sim", HTTP_POST, handleSimTableSave);
+  server.on("/tables/sim/reset", HTTP_POST, handleSimTableReset);
   server.on("/wifi_status.json", HTTP_GET, handleWifiStatus);
   server.on("/wifi_save", HTTP_POST, handleWifiSave);
   server.on("/wifi_clear", HTTP_POST, handleWifiClear);

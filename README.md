@@ -5,15 +5,15 @@ Reprogramming the original InsideRide Smart Rollers with Qubo Smart Unit to use 
 1. [Introduction](#introduction)
 2. [Features](#features)
 3. [How to Use the Smart Rollers](#how-to-use-the-smart-rollers)
-4. [How Smart Rollers Work](#how-smart-rollers-work)
-5. [How to Use the Web Server](#how-to-use-the-web-server)
-6. [How to Install Code](#how-to-install-code)
-7. [How to Modify Code](#how-to-modify-code)
-8. [How to View Serial Data](#how-to-view-serial-data)
-9. [High-Level Code Flow](#high-level-code-flow)
-10. [Calibration](#calibration)
-11. [LED States](#led-states)
-12. [Hardware](#hardware)
+4. [How to Use the Web Server](#how-to-use-the-web-server)
+5. [Calibration](#calibration)
+6. [LED States](#led-states)
+7. [How to Install Code](#how-to-install-code)
+8. [How to Modify Code](#how-to-modify-code)
+9. [How to View Serial Data](#how-to-view-serial-data)
+10. [High-Level Code Flow](#high-level-code-flow)
+11. [Hardware](#hardware)
+12. [How Smart Rollers Work](#how-smart-rollers-work)
 13. [Changelog](#changelog)
 
 ## Introduction
@@ -37,7 +37,7 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 - WebSocket for real-time live updates (5 Hz)
 - Over-the-Air (OTA) firmware updates with rollback support
 - Manual grade override from web interface
-- IDLE curve calibration adjustable via web interface
+- Calibration tables (Power, ERG, SIM, IDLE) editable via web interface
 - Automatic motor enable/disable based on speed (enables at 2.3 mph, disables at 2.0 mph)
 - BLE connection keep-alive with automatic advertising restart
 
@@ -66,6 +66,8 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 
 <img width="750" height="464" alt="image" src="https://github.com/user-attachments/assets/b7175e7f-262d-413d-aa35-3675efdd25b5" />
 
+## How to Use the Web Server
+
 ### Web Server Features
 
 - **Live Diagnostics**: Real-time display of speed, power, position, target, mode, and BLE connection status (updates at 5 Hz via WebSocket).
@@ -73,7 +75,7 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
   - **Go To Position**: Set a specific resistance position (0-1000).
   - **Go To Grade**: Simulate a specific grade (-4% to +10%).
   - **Resume App Control**: Return control to the cycling software.
-- **Power/Resistance Calibration**: Adjust calibrations, more info below
+- **Calibration Tables**: Edit Power, ERG, SIM, and IDLE curve calibration tables.
 - **WiFi Settings**: Configure home WiFi credentials for client mode.
 - **OTA Firmware Update**: Upload new firmware via the web interface.
 - **Firmware Rollback**: Roll back to the previous firmware version if needed.
@@ -81,8 +83,6 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 <img width="648" height="890" alt="image" src="https://github.com/user-attachments/assets/a66d8d64-0258-43fe-bea0-9ad6bec8d562" />
 
 <img width="648" height="887" alt="image" src="https://github.com/user-attachments/assets/18797813-9ea8-4d3e-92af-26f3565a7201" />
-
-## How to Use the Web Server
 
 ### Connecting to the Web Server
 
@@ -102,7 +102,7 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 ## Calibration
 [Open the calibration sheet here, and click File->Make A Copy](https://docs.google.com/spreadsheets/d/1ms1v0VSItGCXlNBLQxa4k6v1qUVAd-xvwpPeUVLPMmU/edit?usp=sharing)
 
-This section shown below focuses on the calibration needed to make ERG mode as quick as possible and to let the controller estimate power as accurate as possible.  Many cycling apps have a "Power Match" feature, where if you are using a power meter on your bike, they will constantly monitor and adjust to make your power match the target, and dialing in these calibrations will ensure that the rollers provide the right restistance right away and rely less on the feedback algoritm.  Use the first table for your test targets, open the Web Server to view the speed and set stepper position, read the power meter through an app (like Zwift) or with a bike computer (like a Garmin), and note the power output at each calibration point.  Once all yellow boxes are complete, the second and third tables will be entered on the calibration page of the Web Server.  The values below can be considered "default" as a rider who's 170lbs, with a road bike with 80psi tires.
+This section focuses on the calibration needed to make ERG mode as quick as possible and to let the controller estimate power as accurately as possible. Many cycling apps have a "Power Match" feature, where if you are using a power meter on your bike, they will constantly monitor and adjust to make your power match the target. Dialing in these calibrations will ensure that the rollers provide the right resistance right away and rely less on the feedback algorithm.  Use the first table for your test targets, open the Web Server to view the speed and set stepper position, read the power meter through an app (like Zwift) or with a bike computer (like a Garmin), and note the power output at each calibration point.  Once all yellow boxes are complete, the second and third tables will be entered on the calibration page of the Web Server.  The values below can be considered "default" as a rider who's 170lbs, with a road bike with 80psi tires.
 
 <img width="1348" height="620" alt="image" src="https://github.com/user-attachments/assets/800661d7-f910-468a-88b6-004aab696d96" />
 
@@ -119,6 +119,7 @@ Lastly, this section is what dictates the power versus speed curve when you are 
 The IDLE mode uses a cubic polynomial to determine stepper position based on speed:
 ```
 position = a + b×speed + c×speed² + d×speed³
+```
 
 <img width="873" height="384" alt="image" src="https://github.com/user-attachments/assets/c304ba8c-8cfd-4c82-99e3-616dfd28eea0" />
 
@@ -290,3 +291,4 @@ See PCB schematic and design below.
 | 2026-01-16_01 | WiFi client mode with NVS storage, mDNS support |
 | 2026-01-23_01 | WebSocket for live updates, OTA rollback support |
 | 2026-02-02_01 | WiFi settings via web UI, improved NVS reliability |
+| 2026-02-03_01 | Editable calibration tables (Power, ERG, SIM, IDLE) via web UI |

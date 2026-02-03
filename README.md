@@ -102,19 +102,29 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 ## Calibration
 [Open the calibration sheet here, and click File->Make A Copy](https://docs.google.com/spreadsheets/d/1ms1v0VSItGCXlNBLQxa4k6v1qUVAd-xvwpPeUVLPMmU/edit?usp=sharing)
 
-This section focuses on the calibration needed to make ERG mode as quick as possible and to let the controller estimate power as accurately as possible. Many cycling apps have a "Power Match" feature, where if you are using a power meter on your bike, they will constantly monitor and adjust to make your power match the target. Dialing in these calibrations will ensure that the rollers provide the right resistance right away and rely less on the feedback algorithm.  Use the first table for your test targets, open the Web Server to view the speed and set stepper position, read the power meter through an app (like Zwift) or with a bike computer (like a Garmin), and note the power output at each calibration point.  Once all yellow boxes are complete, the second and third tables will be entered on the calibration page of the Web Server.  The values below can be considered "default" as a rider who's 170lbs, with a road bike with 80psi tires.
+### Power Table (ERG Mode & Power Estimation)
+
+This section focuses on the calibration needed to make ERG mode as quick as possible and to let the controller estimate power as accurately as possible. Many cycling apps have a "Power Match" feature, where if you are using a power meter on your bike, they will constantly monitor and adjust to make your power match the target. Dialing in these calibrations will ensure that the rollers provide the right resistance right away and rely less on the feedback algorithm.
+
+Use the first table for your test targets, open the Web Server to view the speed and set stepper position, read the power meter through an app (like Zwift) or with a bike computer (like a Garmin), and note the power output at each calibration point. Once all yellow boxes are complete, the second and third tables will be entered on the calibration page of the Web Server. The values below can be considered "default" for a rider who's 170 lbs, with a road bike with 80 psi tires.
 
 <img width="1348" height="620" alt="image" src="https://github.com/user-attachments/assets/800661d7-f910-468a-88b6-004aab696d96" />
 
 <img width="719" height="815" alt="image" src="https://github.com/user-attachments/assets/a5fd2fc5-9d49-42e5-9e50-ed4054d47cb3" />
 
-This section will set the resistance during SIM mode.  You can use the chart in the previous section to get a feel for how much "ramp-up" of the stepper position you want, to get a desired power output.  This section is most useful for high power sprints.  If you take note during a Zwift race for example, that you have to get your wheels spinning really fast in top gear to reach your desired sprint power, then you would want to adjust the ramp-up to happen at a slower speed.  The downside is that you will then have less resolution to hit specific power targets, another way to say it is that if you are in a high-ramp zone of the curve, shifting up a gear will have a much more drastic impact on power than if you were on a shallower portion of the curve.  Once you've settled on a calibration table, enter the values in the Web Server.
+### SIM Table (Simulation Mode)
+
+This section sets the resistance during SIM mode. You can use the chart in the previous section to get a feel for how much "ramp-up" of the stepper position you want to achieve a desired power output. This section is most useful for high power sprints.
+
+If you take note during a Zwift race, for example, that you have to get your wheels spinning really fast in top gear to reach your desired sprint power, then you would want to adjust the ramp-up to happen at a slower speed. The downside is that you will then have less resolution to hit specific power targets. Another way to say it is that if you are in a high-ramp zone of the curve, shifting up a gear will have a much more drastic impact on power than if you were on a shallower portion of the curve. Once you've settled on a calibration table, enter the values in the Web Server.
 
 <img width="1101" height="220" alt="image" src="https://github.com/user-attachments/assets/35912de4-dab2-4110-990e-9f3ea241fd53" />
 
 <img width="575" height="415" alt="image" src="https://github.com/user-attachments/assets/92610891-e2f5-4a6c-876f-9a266b47b069" />
 
-Lastly, this section is what dictates the power versus speed curve when you are not in ERG or SIM mode, if you are not using a cycling app, the controller disconnects mid-Zwift race, etc.  The goal of this is to feel similar to a dumb-trainer, like a mag or fluid trainer without smart functions.  Just a simple curve that allows you to hit any power with a range of speed that most road bikes can hit.  Enter the coefficients from the spreadsheet into the Web Server.
+### IDLE Curve (Fallback Mode)
+
+This section dictates the power versus speed curve when you are not in ERG or SIM mode—if you are not using a cycling app, the controller disconnects mid-Zwift race, etc. The goal is to feel similar to a dumb trainer, like a mag or fluid trainer without smart functions. Just a simple curve that allows you to hit any power with a range of speed that most road bikes can hit. Enter the coefficients from the spreadsheet into the Web Server.
 
 The IDLE mode uses a cubic polynomial to determine stepper position based on speed:
 ```

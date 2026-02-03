@@ -163,7 +163,8 @@ position = a + b×speed + c×speed² + d×speed³
 7. WiFi will disconnect on restart, so you will not get a final confirmation that firmware was uploaded.
 8. Reconnect to WiFi, navigate back to the web server and confirm the firmware version matches the .bin file name.
 
-<img width="334" height="195" alt="image" src="https://github.com/user-attachments/assets/9d1386bf-b0ef-4e37-af2a-232395936b46" />
+<img width="650" height="277" alt="image" src="https://github.com/user-attachments/assets/cf526560-af2d-40e6-8cb8-290c5be94e5d" />
+
 
 ### Via Arduino IDE
 1. Download Arduino IDE software.

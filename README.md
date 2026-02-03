@@ -66,23 +66,21 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 
 <img width="750" height="464" alt="image" src="https://github.com/user-attachments/assets/b7175e7f-262d-413d-aa35-3675efdd25b5" />
 
-## How Smart Rollers Work
-* Most cycling trainers work off the Eddy Current theory: magnets placed near moving ferrous material will create resistance.
-* The Qubo smart unit uses a flywheel connected to the rear rollers by a belt, 2 magnets on a plastic sled, and a stepper motor to control the position.
-* The closer the magnets are to being fully placed over the flywheel, the more resistance is generated, causing more power required at the pedals.
-* As flywheel speed increases, required power also increases.
-* In ERG mode for example, to keep a constant power, as the cyclist shifts up or increases cadence, magnetic resistance will need to be lowered to compensate, and vice versa.
-* In SIM mode, there is some calibration table that sets magnet position based on grade (most trainers ignore wind, rolling resistance, etc.; those only affect speed in the game).
-* This whole project is simply just: take ERG or SIM inputs, and tell the stepper motor what position to go to.
+### Web Server Features
 
-##### Magnet moving in relation to flywheel
-![magnet](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/blob/TestLimits/gifs/Magnet_v2.gif)
+- **Live Diagnostics**: Real-time display of speed, power, position, target, mode, and BLE connection status (updates at 5 Hz via WebSocket).
+- **Manual Control**:
+  - **Go To Position**: Set a specific resistance position (0-1000).
+  - **Go To Grade**: Simulate a specific grade (-4% to +10%).
+  - **Resume App Control**: Return control to the cycling software.
+- **Power/Resistance Calibration**: Adjust calibrations, more info below
+- **WiFi Settings**: Configure home WiFi credentials for client mode.
+- **OTA Firmware Update**: Upload new firmware via the web interface.
+- **Firmware Rollback**: Roll back to the previous firmware version if needed.
 
-##### Fast jog move of stepper motor
-![jogging](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/blob/TestLimits/gifs/Jogging.gif)
+<img width="648" height="890" alt="image" src="https://github.com/user-attachments/assets/a66d8d64-0258-43fe-bea0-9ad6bec8d562" />
 
-#### Homing using the limit switch
-![Homing](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/blob/TestLimits/gifs/Homing.gif)
+<img width="648" height="887" alt="image" src="https://github.com/user-attachments/assets/18797813-9ea8-4d3e-92af-26f3565a7201" />
 
 ## How to Use the Web Server
 
@@ -101,19 +99,46 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 5. Reconnect to your home WiFi network.
 6. Navigate to `http://insideride.local` or the IP address shown in the serial logs.
 
-### Web Server Features
+## Calibration
+[Open the calibration sheet here, and click File->Make A Copy](https://docs.google.com/spreadsheets/d/1ms1v0VSItGCXlNBLQxa4k6v1qUVAd-xvwpPeUVLPMmU/edit?usp=sharing)
 
-- **Live Diagnostics**: Real-time display of speed, power, position, target, mode, and BLE connection status (updates at 5 Hz via WebSocket).
-- **Manual Control**:
-  - **Go To Position**: Set a specific resistance position (0-1000).
-  - **Go To Grade**: Simulate a specific grade (-4% to +10%).
-  - **Resume App Control**: Return control to the cycling software.
-- **IDLE Curve Calibration**: Adjust the speed-to-position polynomial curve coefficients (a, b, c, d).
-- **WiFi Settings**: Configure home WiFi credentials for client mode.
-- **OTA Firmware Update**: Upload new firmware via the web interface.
-- **Firmware Rollback**: Roll back to the previous firmware version if needed.
+This section shown below focuses on the calibration needed to make ERG mode as quick as possible and to let the controller estimate power as accurate as possible.  Many cycling apps have a "Power Match" feature, where if you are using a power meter on your bike, they will constantly monitor and adjust to make your power match the target, and dialing in these calibrations will ensure that the rollers provide the right restistance right away and rely less on the feedback algoritm.  Use the first table for your test targets, open the Web Server to view the speed and set stepper position, read the power meter through an app (like Zwift) or with a bike computer (like a Garmin), and note the power output at each calibration point.  Once all yellow boxes are complete, the second and third tables will be entered on the calibration page of the Web Server.  The values below can be considered "default" as a rider who's 170lbs, with a road bike with 80psi tires.
 
-<img width="418" height="794" alt="image" src="https://github.com/user-attachments/assets/f7df38b4-52ae-4321-9147-8cbced5f589d" />
+<img width="1348" height="620" alt="image" src="https://github.com/user-attachments/assets/800661d7-f910-468a-88b6-004aab696d96" />
+
+<img width="719" height="815" alt="image" src="https://github.com/user-attachments/assets/a5fd2fc5-9d49-42e5-9e50-ed4054d47cb3" />
+
+This section will set the resistance during SIM mode.  You can use the chart in the previous section to get a feel for how much "ramp-up" of the stepper position you want, to get a desired power output.  This section is most useful for high power sprints.  If you take note during a Zwift race for example, that you have to get your wheels spinning really fast in top gear to reach your desired sprint power, then you would want to adjust the ramp-up to happen at a slower speed.  The downside is that you will then have less resolution to hit specific power targets, another way to say it is that if you are in a high-ramp zone of the curve, shifting up a gear will have a much more drastic impact on power than if you were on a shallower portion of the curve.  Once you've settled on a calibration table, enter the values in the Web Server.
+
+<img width="1101" height="220" alt="image" src="https://github.com/user-attachments/assets/35912de4-dab2-4110-990e-9f3ea241fd53" />
+
+<img width="575" height="415" alt="image" src="https://github.com/user-attachments/assets/92610891-e2f5-4a6c-876f-9a266b47b069" />
+
+Lastly, this section is what dictates the power versus speed curve when you are not in ERG or SIM mode, if you are not using a cycling app, the controller disconnects mid-Zwift race, etc.  The goal of this is to feel similar to a dumb-trainer, like a mag or fluid trainer without smart functions.  Just a simple curve that allows you to hit any power with a range of speed that most road bikes can hit.  Enter the coefficients from the spreadsheet into the Web Server.
+
+The IDLE mode uses a cubic polynomial to determine stepper position based on speed:
+```
+position = a + b×speed + c×speed² + d×speed³
+
+<img width="873" height="384" alt="image" src="https://github.com/user-attachments/assets/c304ba8c-8cfd-4c82-99e3-616dfd28eea0" />
+
+<img width="416" height="175" alt="image" src="https://github.com/user-attachments/assets/c435f839-3182-4543-82ec-1ae145a7b4d6" />
+
+## LED States
+| State | LED Behavior |
+|-------|--------------|
+| OTA in progress | Rapid blink (10 Hz) |
+| OTA unlocked window | Double-blink every ~2s |
+| Fault / rehome requested / limit hit | SOS-like triple blink repeating |
+| Homing | Medium blink (2 Hz) |
+| BLE connected | "Heartbeat" (short on, long off) |
+
+### Mode Indication
+| Mode | LED Behavior |
+|------|--------------|
+| ERG | Solid ON |
+| SIM | Slow blink (1 Hz) |
+| IDLE | OFF |
 
 ## How to Install Code
 
@@ -202,52 +227,9 @@ If any issues arise during OTA updates, or the Web Server isn't working to show 
 * Code checks if Web Server manual control is active, in order to ignore ERG/SIM commands.
 * BLE advertising is restarted periodically to maintain connection availability.
 
-## Calibration
-* Working to make spreadsheet cleaner. Will then upload a spreadsheet to turn test data into calibration tables, and make the descriptions more English-friendly.
-
-#### Use the speed and stepper position targets, along with the Web Server readout and some way to read power (Zwift, Garmin, etc.), and fill in the calibration table
-*(Note: my initial spreadsheet will assume you can exert enough power to hit all these targets; in the future I will refine the spreadsheet to make the calibration table based on whatever data you give it)*
-
-<img width="515" height="133" alt="image" src="https://github.com/user-attachments/assets/42d8e861-e392-4805-9346-c76a7ff4a14d" />
-
-#### Spreadsheet will extrapolate into a larger table to supply to the function `powerFromSpeedPos()` with x-axis stepper position, y-axis speed, and z-output power
-I did no riding at max stepper position because the resistance is so great, and I obviously didn't reach 50 mph to calibrate, but extrapolated that far so I didn't have to extrapolate in Arduino code.
-
-<img width="616" height="177" alt="image" src="https://github.com/user-attachments/assets/81bc5640-7105-483f-8466-2abc16836f68" />
-
-#### Spreadsheet will back-calculate a new table to supply to the function `stepFromPowerSpeed()` with x-axis target power, y-axis speed, and z-output stepper position
-Anything below 0 was clamped to 0, and anything above 1000 was clamped to 1000.
-
-<img width="1015" height="175" alt="image" src="https://github.com/user-attachments/assets/f8f9d1f2-57ec-453a-8201-e04f75d1d41c" />
-
-#### This table was made from testing out different Trainer Difficulties, finding what grade vs. stepper position I liked, and then ramping up with speed so that you don't have to spin so fast to get high power on flats
-This supplies to the function `gradeToSteps()` with x-axis grade, y-axis speed, and z-output stepper position.
-
-<img width="814" height="197" alt="image" src="https://github.com/user-attachments/assets/88826368-dddb-47ad-84c3-26f48c430932" />
-
-#### IDLE Curve Calibration
-The IDLE mode uses a cubic polynomial to determine stepper position based on speed:
-```
-position = a + b×speed + c×speed² + d×speed³
-```
-These coefficients can be adjusted via the Web Server's **IDLE Curve Calibration** section. Changes are saved to NVS and persist across reboots.
 
 
-## LED States
-| State | LED Behavior |
-|-------|--------------|
-| OTA in progress | Rapid blink (10 Hz) |
-| OTA unlocked window | Double-blink every ~2s |
-| Fault / rehome requested / limit hit | SOS-like triple blink repeating |
-| Homing | Medium blink (2 Hz) |
-| BLE connected | "Heartbeat" (short on, long off) |
 
-### Mode Indication
-| Mode | LED Behavior |
-|------|--------------|
-| ERG | Solid ON |
-| SIM | Slow blink (1 Hz) |
-| IDLE | OFF |
 
 ## Hardware
 See PCB schematic and design below.
@@ -275,6 +257,23 @@ See PCB schematic and design below.
 | 330Ω 1/4W resistor | LED current limiting (poor fit with V2 PCB) |
 | Ring terminal and wire | Motor ground strap |
 
+## How Smart Rollers Work
+* Most cycling trainers work off the Eddy Current theory: magnets placed near moving ferrous material will create resistance.
+* The Qubo smart unit uses a flywheel connected to the rear rollers by a belt, 2 magnets on a plastic sled, and a stepper motor to control the position.
+* The closer the magnets are to being fully placed over the flywheel, the more resistance is generated, causing more power required at the pedals.
+* As flywheel speed increases, required power also increases.
+* In ERG mode for example, to keep a constant power, as the cyclist shifts up or increases cadence, magnetic resistance will need to be lowered to compensate, and vice versa.
+* In SIM mode, there is some calibration table that sets magnet position based on grade (most trainers ignore wind, rolling resistance, etc.; those only affect speed in the game).
+* This whole project is simply just: take ERG or SIM inputs, and tell the stepper motor what position to go to.
+
+##### Magnet moving in relation to flywheel
+![magnet](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/blob/TestLimits/gifs/Magnet_v2.gif)
+
+##### Fast jog move of stepper motor
+![jogging](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/blob/TestLimits/gifs/Jogging.gif)
+
+#### Homing using the limit switch
+![Homing](https://github.com/acedeuce802/InsideRideRollers_Qubo_to_FTMS/blob/TestLimits/gifs/Homing.gif)
 
 ## Changelog
 *Only including FW versions since I started exporting .bin files as unique FW names*

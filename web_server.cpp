@@ -206,6 +206,13 @@ static void handleRoot() {
     .btn-danger:hover {
       background: #c82333;
     }
+    .btn-secondary {
+      background: #6c757d;
+      color: white;
+    }
+    .btn-secondary:hover {
+      background: #545b62;
+    }
     .btn-block {
       width: 100%;
       margin: 5px 0;
@@ -328,8 +335,26 @@ static void handleRoot() {
   </div>
 
   <div class="container">
-    <h2>📶 WiFi Settings</h2>
+    <h2>📶 WiFi & Device Settings</h2>
     <div class="control-group">
+      <h3 style="margin-top: 0; color: #444;">Device Identity</h3>
+      <p style="font-size: 13px; color: #666; margin: 5px 0 10px 0;">
+        <strong>Device ID:</strong> <span id="device_id" style="font-family: monospace; background: #e9ecef; padding: 2px 6px; border-radius: 3px;">--</span> |
+        <strong>Hostname:</strong> <span id="hostname" style="font-family: monospace;">--</span> |
+        <strong>AP SSID:</strong> <span id="ap_ssid">--</span>
+      </p>
+      <div style="margin-bottom: 10px;">
+        <label for="device_name"><strong>Device Name (optional):</strong></label>
+        <input type="text" id="device_name" placeholder="e.g., Trainer1, Upstairs, Garage" maxlength="24" style="width: 100%; padding: 10px; font-size: 16px; border: 2px solid #ddd; border-radius: 4px; box-sizing: border-box;">
+        <small style="color: #666;">Custom name for this device (max 24 chars). Leave blank to use MAC-based default.</small>
+      </div>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
+        <button class="btn-primary" onclick="saveDeviceName()">💾 Save Name</button>
+        <button class="btn-secondary" onclick="clearDeviceName()">↩️ Use Default</button>
+      </div>
+      <div id="device_msg" style="margin-bottom: 10px; display: none; padding: 8px; border-radius: 4px;"></div>
+
+      <h3 style="color: #444; border-top: 1px solid #ddd; padding-top: 15px;">WiFi Network</h3>
       <p style="font-size: 13px; color: #666; margin: 5px 0 10px 0;">
         <strong>Status:</strong> <span id="wifi_status">--</span> |
         <strong>IP:</strong> <span id="wifi_ip">--</span> |
@@ -353,7 +378,7 @@ static void handleRoot() {
         <strong>⚠️ Important:</strong> After clicking Save, please wait up to 60 seconds.
         The page may become unresponsive - this is normal. Do NOT power cycle the device.
         After saving, click Restart, then reconnect to your home WiFi and browse to
-        <strong>http://insideride.local</strong> or the IP address shown in the device logs.
+        <strong>http://<span id="hostname_note">insideride-XXXX</span>.local</strong> or the IP address shown in the device logs.
       </div>
     </div>
   </div>
@@ -543,11 +568,20 @@ static void handleRoot() {
         .catch(e => alert('Rollback failed: ' + e));
     }
 
-    // ==================== WIFI FUNCTIONS ====================
+    // ==================== WIFI & DEVICE FUNCTIONS ====================
     function loadWifiStatus() {
       fetch('/wifi_status.json')
         .then(r => r.json())
         .then(d => {
+          // Device identity
+          document.getElementById('device_id').textContent = d.device_id || '--';
+          document.getElementById('hostname').textContent = d.hostname || '--';
+          document.getElementById('ap_ssid').textContent = d.ap_ssid || '--';
+          document.getElementById('hostname_note').textContent = d.hostname || 'insideride-XXXX';
+          if (d.device_name) {
+            document.getElementById('device_name').value = d.device_name;
+          }
+          // WiFi status
           document.getElementById('wifi_status').textContent = d.client_mode ? 'Connected' : 'AP Mode';
           document.getElementById('wifi_ip').textContent = d.ip;
           document.getElementById('wifi_rssi').textContent = d.client_mode ? d.rssi + ' dBm' : 'N/A';
@@ -556,6 +590,42 @@ static void handleRoot() {
           }
         })
         .catch(e => console.error('WiFi status failed:', e));
+    }
+
+    function saveDeviceName() {
+      let name = document.getElementById('device_name').value.trim();
+      if (name.length > 24) {
+        showDeviceMsg('Name too long (max 24 characters)', false);
+        return;
+      }
+      fetch('/device_name_save?name=' + encodeURIComponent(name), {method: 'POST'})
+        .then(r => r.text())
+        .then(msg => {
+          showDeviceMsg('✓ ' + msg, true);
+          loadWifiStatus();
+        })
+        .catch(e => showDeviceMsg('Save failed: ' + e, false));
+    }
+
+    function clearDeviceName() {
+      if (!confirm('Reset device name to MAC-based default?')) return;
+      fetch('/device_name_clear', {method: 'POST'})
+        .then(r => r.text())
+        .then(msg => {
+          showDeviceMsg(msg, true);
+          document.getElementById('device_name').value = '';
+          loadWifiStatus();
+        })
+        .catch(e => showDeviceMsg('Clear failed: ' + e, false));
+    }
+
+    function showDeviceMsg(msg, success) {
+      let el = document.getElementById('device_msg');
+      el.textContent = msg;
+      el.style.display = 'block';
+      el.style.background = success ? '#d4edda' : '#f8d7da';
+      el.style.color = success ? '#155724' : '#721c24';
+      setTimeout(() => { el.style.display = 'none'; }, 5000);
     }
 
     function saveWifi() {
@@ -1230,11 +1300,16 @@ static void handleWifiStatus() {
   json += "\"ssid\":\"" + String(gWifiConfigured ? gWifiSsid : "") + "\",";
   if (gWifiClientMode) {
     json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
-    json += "\"rssi\":" + String(WiFi.RSSI());
+    json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
   } else {
     json += "\"ip\":\"" + WiFi.softAPIP().toString() + "\",";
-    json += "\"rssi\":0";
+    json += "\"rssi\":0,";
   }
+  // Device identity info
+  json += "\"device_id\":\"" + String(gDeviceId) + "\",";
+  json += "\"device_name\":\"" + String(gDeviceNameSet ? gDeviceName : "") + "\",";
+  json += "\"hostname\":\"" + String(getEffectiveHostname()) + "\",";
+  json += "\"ap_ssid\":\"" + String(getEffectiveApSsid()) + "\"";
   json += "}";
   server.send(200, "application/json", json);
 }
@@ -1286,6 +1361,30 @@ static void handleWifiRestart() {
   server.send(200, "text/plain", "Restarting WiFi...");
   delay(500);
   ESP.restart();
+}
+
+static void handleDeviceNameSave() {
+  if (!server.hasArg("name")) {
+    server.send(400, "text/plain", "Missing name parameter");
+    return;
+  }
+
+  String name = server.arg("name");
+
+  // Validate name (alphanumeric, spaces, dashes, max 24 chars)
+  if (name.length() > 24) {
+    server.send(400, "text/plain", "Name too long (max 24 characters)");
+    return;
+  }
+
+  deviceNameSave(name.c_str());
+
+  server.send(200, "text/plain", "Device name saved! Restart required for changes to take effect.");
+}
+
+static void handleDeviceNameClear() {
+  deviceNameClear();
+  server.send(200, "text/plain", "Device name cleared. Restart required for changes to take effect.");
 }
 
 static void handleOtaInfo() {
@@ -1493,8 +1592,9 @@ static bool startAPMode() {
     Serial.println("======================================");
   }, ARDUINO_EVENT_WIFI_AP_STADISCONNECTED);
 
-  // Start the AP
-  if (!WiFi.softAP(AP_SSID, AP_PASS)) {
+  // Start the AP with device-specific SSID
+  const char* apSsid = getEffectiveApSsid();
+  if (!WiFi.softAP(apSsid, AP_PASS)) {
     Serial.println("[WiFi] AP start FAILED");
     return false;
   }
@@ -1503,7 +1603,7 @@ static bool startAPMode() {
 
   IPAddress IP = WiFi.softAPIP();
   Serial.println("[WiFi] AP Mode Active");
-  Serial.printf("  SSID: %s\n", AP_SSID);
+  Serial.printf("  SSID: %s\n", apSsid);
   Serial.printf("  Password: %s\n", AP_PASS);
   Serial.printf("  IP: %s\n", IP.toString().c_str());
 
@@ -1583,20 +1683,21 @@ void webServerInit() {
   }
 
   if (wifiOk) {
-    // Start mDNS responder
-    if (MDNS.begin("insideride")) {
+    // Start mDNS responder with device-specific hostname
+    const char* hostname = getEffectiveHostname();
+    if (MDNS.begin(hostname)) {
       MDNS.addService("http", "tcp", 80);
-      Serial.println("✓ mDNS started: http://insideride.local");
+      Serial.printf("✓ mDNS started: http://%s.local\n", hostname);
     } else {
       Serial.println("✗ mDNS failed to start");
     }
 
     if (gWifiClientMode) {
       Serial.println("Browse to:");
-      Serial.printf("  http://%s  or  http://insideride.local\n", WiFi.localIP().toString().c_str());
+      Serial.printf("  http://%s  or  http://%s.local\n", WiFi.localIP().toString().c_str(), hostname);
     } else {
       Serial.println("Connect to this network and browse to:");
-      Serial.printf("  http://%s  or  http://insideride.local\n", WiFi.softAPIP().toString().c_str());
+      Serial.printf("  http://%s  or  http://%s.local\n", WiFi.softAPIP().toString().c_str(), hostname);
     }
   } else {
     Serial.println("ERROR: Failed to start WiFi!");
@@ -1629,6 +1730,8 @@ void webServerInit() {
   server.on("/wifi_save", HTTP_POST, handleWifiSave);
   server.on("/wifi_clear", HTTP_POST, handleWifiClear);
   server.on("/wifi_restart", HTTP_POST, handleWifiRestart);
+  server.on("/device_name_save", HTTP_POST, handleDeviceNameSave);
+  server.on("/device_name_clear", HTTP_POST, handleDeviceNameClear);
   server.on("/ota_info.json", HTTP_GET, handleOtaInfo);
   server.on("/ota_rollback", HTTP_POST, handleOtaRollback);
   server.on("/update", HTTP_GET, handleUpdateForm);

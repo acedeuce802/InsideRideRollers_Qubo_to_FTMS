@@ -33,7 +33,8 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 - 9-30V input (only tested with 12V supply, same as Qubo module comes with)
 - WiFi Access Point with web server for diagnostics and configuration
 - WiFi client mode to connect to your home network
-- mDNS support (access via `http://insideride.local`)
+- Unique device identification using MAC address (supports multiple devices on the same network)
+- mDNS support (access via `http://insideride-XXXX.local` where XXXX is your device ID)
 - WebSocket for real-time live updates (5 Hz)
 - Over-the-Air (OTA) firmware updates with rollback support
 - Manual grade override from web interface
@@ -86,18 +87,33 @@ Cycling rollers have 2 rollers in the rear for the rear wheel, and 1 roller in t
 
 ### Connecting to the Web Server
 
-#### Option 1: Access Point Mode (Default)
+#### Option 1: Access Point Mode (First-Time Setup)
 1. Power on the device.
-2. Connect to the WiFi network **"InsideRideCal"** (password: **insideride**).
-3. Navigate to `http://192.168.4.1` or `http://insideride.local` in a browser.
+2. Look for available WiFi networks. You will see a network named **"InsideRide-XXXX"** where XXXX is your device's unique 4-character ID (derived from the MAC address, e.g., "InsideRide-0001" or "InsideRide-A1B2").
+3. **Take note of your device ID (XXXX)** - you'll need this to access the web server later.
+4. Connect to the WiFi network (password: **insideride**).
+5. Navigate to `http://192.168.4.1` in a browser.
 
 #### Option 2: Home WiFi Mode
-1. First connect via Access Point mode (above).
-2. In the **WiFi Settings** section, enter your home network SSID and password.
+1. First connect via Access Point mode (above) and note your device ID.
+2. In the **WiFi & Device Settings** section, enter your home network SSID and password.
 3. Click **Save**, wait up to 60 seconds (the page may become unresponsive - this is normal).
 4. Click **Restart**.
 5. Reconnect to your home WiFi network.
-6. Navigate to `http://insideride.local` or the IP address shown in the serial logs.
+6. Navigate to `http://insideride-XXXX.local` (replace XXXX with your device ID, e.g., `http://insideride-0001.local`) or the IP address shown in the serial logs.
+
+#### Custom Device Names
+If you have multiple devices or prefer a friendlier name, you can set a custom device name in the **WiFi & Device Settings** section:
+1. Enter a name (e.g., "Trainer1", "Garage", "Upstairs") in the **Device Name** field.
+2. Click **Save Name**, then **Restart**.
+3. The device will now be accessible at `http://your-custom-name.local` (e.g., `http://trainer1.local`).
+4. The AP SSID will also change to reflect the custom name (e.g., "InsideRide-Trainer1").
+
+#### Multiple Devices on the Same Network
+Each device has a unique ID based on its MAC address, so multiple devices can coexist on the same network:
+- Device 1: `http://insideride-0001.local`
+- Device 2: `http://insideride-A1B2.local`
+- Or with custom names: `http://trainer1.local`, `http://trainer2.local`
 
 ## Calibration
 [Open the calibration sheet here, and click File->Make A Copy](https://docs.google.com/spreadsheets/d/1ms1v0VSItGCXlNBLQxa4k6v1qUVAd-xvwpPeUVLPMmU/edit?usp=sharing)
@@ -303,3 +319,4 @@ See PCB schematic and design below.
 | 2026-01-23_01 | WebSocket for live updates, OTA rollback support |
 | 2026-02-02_01 | WiFi settings via web UI, improved NVS reliability |
 | 2026-02-03_01 | Editable calibration tables (Power, ERG, SIM, IDLE) via web UI |
+| 2026-02-04_01 | Unique device ID from MAC address, custom device naming, multi-device support |

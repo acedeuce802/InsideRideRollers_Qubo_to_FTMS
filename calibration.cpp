@@ -6,6 +6,7 @@
 #include "sensors.h"
 #include <Preferences.h>
 #include <nvs_flash.h>
+#include <WiFi.h>
 
 // ==================== GLOBAL CALIBRATION DATA ====================
 float gIdleCurveA = IDLE_CURVE_DEFAULT_A;
@@ -18,6 +19,15 @@ char gWifiSsid[64] = "";
 char gWifiPass[64] = "";
 bool gWifiConfigured = false;
 
+// ==================== DEVICE IDENTITY ====================
+char gDeviceId[8] = "";         // Last 4 hex digits of MAC
+char gDeviceName[32] = "";      // User-friendly name
+bool gDeviceNameSet = false;
+
+// Buffers for generated names
+static char sEffectiveHostname[48] = "";
+static char sEffectiveApSsid[48] = "";
+
 // ==================== NVS STORAGE ====================
 static Preferences prefs;
 static const char* NVS_NAMESPACE = "calibration";
@@ -26,6 +36,12 @@ static const char* NVS_NAMESPACE = "calibration";
 
 void calibrationInit() {
   Serial.println("[CAL] calibrationInit starting...");
+
+  // Generate device ID from MAC address (last 4 hex digits)
+  uint8_t mac[6];
+  WiFi.macAddress(mac);
+  snprintf(gDeviceId, sizeof(gDeviceId), "%02X%02X", mac[4], mac[5]);
+  Serial.printf("[CAL] Device ID (from MAC): %s\n", gDeviceId);
 
   // Initialize NVS flash if needed
   esp_err_t err = nvs_flash_init();
@@ -101,6 +117,17 @@ void calibrationInit() {
     gWifiConfigured = false;
   }
 
+  // Load device name
+  String devName = prefs.getString("devName", "");
+  if (devName.length() > 0) {
+    strncpy(gDeviceName, devName.c_str(), sizeof(gDeviceName) - 1);
+    gDeviceName[sizeof(gDeviceName) - 1] = '\0';
+    gDeviceNameSet = true;
+  } else {
+    gDeviceName[0] = '\0';
+    gDeviceNameSet = false;
+  }
+
   prefs.end();
 
   Serial.println("[CAL] Settings loaded from NVS:");
@@ -110,6 +137,11 @@ void calibrationInit() {
     Serial.printf("  WiFi SSID: '%s' (configured)\n", gWifiSsid);
   } else {
     Serial.println("  WiFi: Not configured (AP mode only)");
+  }
+  if (gDeviceNameSet) {
+    Serial.printf("  Device name: '%s'\n", gDeviceName);
+  } else {
+    Serial.printf("  Device name: (default, using ID: %s)\n", gDeviceId);
   }
 
   // Load calibration tables (Power, ERG, SIM)
@@ -179,6 +211,72 @@ void wifiSettingsClear() {
   gWifiConfigured = false;
 
   Serial.println("[CAL] WiFi settings cleared");
+}
+
+void deviceNameSave(const char* name) {
+  Serial.printf("[CAL] deviceNameSave called with name='%s'\n", name);
+
+  if (!prefs.begin(NVS_NAMESPACE, false)) {
+    Serial.println("[CAL] ERROR: Failed to open NVS for writing!");
+    return;
+  }
+
+  prefs.putString("devName", name);
+  prefs.end();
+
+  // Update runtime variable
+  strncpy(gDeviceName, name, sizeof(gDeviceName) - 1);
+  gDeviceName[sizeof(gDeviceName) - 1] = '\0';
+  gDeviceNameSet = (strlen(name) > 0);
+
+  Serial.printf("[CAL] Device name saved: '%s'\n", gDeviceName);
+}
+
+void deviceNameClear() {
+  prefs.begin(NVS_NAMESPACE, false);
+  prefs.remove("devName");
+  prefs.end();
+
+  gDeviceName[0] = '\0';
+  gDeviceNameSet = false;
+
+  Serial.println("[CAL] Device name cleared (using default)");
+}
+
+const char* getEffectiveHostname() {
+  if (gDeviceNameSet && strlen(gDeviceName) > 0) {
+    // Use custom name, convert to lowercase and replace spaces with dashes
+    int j = 0;
+    for (int i = 0; gDeviceName[i] && j < (int)sizeof(sEffectiveHostname) - 1; i++) {
+      char c = gDeviceName[i];
+      if (c == ' ') {
+        sEffectiveHostname[j++] = '-';
+      } else if (isalnum(c) || c == '-') {
+        sEffectiveHostname[j++] = tolower(c);
+      }
+      // Skip other characters
+    }
+    sEffectiveHostname[j] = '\0';
+  } else {
+    // Use default: insideride-XXXX
+    snprintf(sEffectiveHostname, sizeof(sEffectiveHostname), "insideride-%s", gDeviceId);
+    // Convert to lowercase
+    for (int i = 0; sEffectiveHostname[i]; i++) {
+      sEffectiveHostname[i] = tolower(sEffectiveHostname[i]);
+    }
+  }
+  return sEffectiveHostname;
+}
+
+const char* getEffectiveApSsid() {
+  if (gDeviceNameSet && strlen(gDeviceName) > 0) {
+    // Use custom name: InsideRide-<name>
+    snprintf(sEffectiveApSsid, sizeof(sEffectiveApSsid), "InsideRide-%s", gDeviceName);
+  } else {
+    // Use default: InsideRide-XXXX
+    snprintf(sEffectiveApSsid, sizeof(sEffectiveApSsid), "InsideRide-%s", gDeviceId);
+  }
+  return sEffectiveApSsid;
 }
 
 int32_t idlePositionFromSpeed(float speedMph) {

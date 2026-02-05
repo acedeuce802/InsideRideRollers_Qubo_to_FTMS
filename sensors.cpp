@@ -20,6 +20,8 @@ static volatile uint32_t gLastAcceptedHallUs = 0;
 // Hall sensor configuration (using values from config.h)
 static const uint32_t HALL_MIN_DT_US = 1500;       // Reject pulses faster than this
 static const uint32_t HALL_HOLDOFF_US = 3000;      // Anti-chatter holdoff (3ms)
+static const uint32_t HALL_TIMEOUT_US = 500000;    // Consider stopped after 500ms without pulse
+static const float MIN_VALID_RPM = 15.0f;          // Below this RPM, treat as stopped (~0.5 mph)
 
 // RPM filtering
 static float gRpmFiltered = 0.0f;
@@ -84,34 +86,50 @@ static float readRPM() {
   uint32_t dt = gHallIntervalUs;
   uint32_t last = gLastHallUs;
   interrupts();
-  
+
   // Check for valid data
   if (last == 0) return 0.0f;
-  if ((micros() - last) > 1000000UL) return 0.0f;  // Stopped >1s
+
+  // Use shorter timeout to detect stopped state faster
+  uint32_t timeSincePulse = micros() - last;
+  if (timeSincePulse > HALL_TIMEOUT_US) return 0.0f;  // Stopped
+
   if (dt == 0) return 0.0f;
-  
+
   // Calculate RPM
   float pps = 1e6f / (float)dt;                    // Pulses per second
   float rps = pps / (float)HALL_PULSES_PER_REV;    // Revolutions per second
-  return rps * 60.0f;                              // RPM
+  float rpm = rps * 60.0f;                         // RPM
+
+  // Reject very low RPM as noise (below ~0.5 mph)
+  if (rpm < MIN_VALID_RPM) return 0.0f;
+
+  return rpm;
 }
 
 static float filterRPM(float rawRpm) {
   uint32_t now = millis();
-  
+
+  // If raw RPM is zero, quickly reset filtered value to zero
+  if (rawRpm == 0.0f) {
+    gRpmFiltered = 0.0f;
+    gLastRpmFilterMs = now;
+    return 0.0f;
+  }
+
   if (gLastRpmFilterMs == 0) {
     gLastRpmFilterMs = now;
     gRpmFiltered = rawRpm;
     return rawRpm;
   }
-  
+
   float dt = (now - gLastRpmFilterMs) / 1000.0f;  // seconds
   gLastRpmFilterMs = now;
-  
+
   // Exponential moving average
   float alpha = dt / (RPM_FILTER_TAU_S + dt);
   gRpmFiltered = alpha * rawRpm + (1.0f - alpha) * gRpmFiltered;
-  
+
   return gRpmFiltered;
 }
 

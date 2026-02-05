@@ -22,6 +22,11 @@ extern char gWifiSsid[64];
 extern char gWifiPass[64];
 extern bool gWifiConfigured;  // true if user has saved WiFi settings
 
+// ==================== DEVICE IDENTITY ====================
+extern char gDeviceId[8];       // Last 4 hex digits of MAC (e.g., "A1B2")
+extern char gDeviceName[32];    // User-friendly name (e.g., "Trainer1")
+extern bool gDeviceNameSet;     // true if user has set a custom name
+
 // ==================== CALIBRATION TABLE DIMENSIONS ====================
 // Power table: speed (7) x position (5) -> watts
 static const int POWER_TABLE_ROWS = 7;   // Speed breakpoints
@@ -44,6 +49,12 @@ void calibrationTablesLoad();   // Load calibration tables from NVS
 // WiFi settings
 void wifiSettingsSave(const char* ssid, const char* pass);
 void wifiSettingsClear();       // Clear saved WiFi (revert to AP-only mode)
+
+// Device identity
+void deviceNameSave(const char* name);  // Save custom device name
+void deviceNameClear();                 // Clear custom name (use default based on MAC)
+const char* getEffectiveHostname();     // Get hostname for mDNS (custom name or "insideride-XXXX")
+const char* getEffectiveApSsid();       // Get AP SSID (custom name or "InsideRide-XXXX")
 
 // Calculate IDLE position from speed using current coefficients
 int32_t idlePositionFromSpeed(float speedMph);
